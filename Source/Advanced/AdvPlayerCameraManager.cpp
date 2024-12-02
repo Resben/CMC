@@ -1,9 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "AdvPlayerCameraManager.h"
+
+#include "AdvCharacterMovementComponent.h"
 #include "AdvancedCharacter.h"
 #include "Components/CapsuleComponent.h"
+
 
 AAdvPlayerCameraManager::AAdvPlayerCameraManager()
 {

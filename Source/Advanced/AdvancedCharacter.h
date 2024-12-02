@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "AdvCharacterMovementComponent.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
@@ -51,6 +50,7 @@ protected:
 
 public:
 	AAdvancedCharacter(const FObjectInitializer& ObjectInitializer);
+	FCollisionQueryParams GetIgnoreCharacterParams() const;
 	
 	/// END OF CUSTOM ///
 	

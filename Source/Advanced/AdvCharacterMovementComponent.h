@@ -1,11 +1,20 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "AdvancedCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AdvCharacterMovementComponent.generated.h"
 
 /// 1. You can alter movement safe variables in non-movement safe functions on the client
 /// 2. You can never utilise non-movement safe variables in a movement safe function
 /// 3. You can't call non-movement safe functions that alter movement safe variables on the server
+
+UENUM(BlueprintType)
+enum ECustomMovementMode
+{
+	CMOVE_None		UMETA(Hidden),
+	CMOVE_Slide		UMETA(DisplayName = "Slide"),
+	CMOVE_Max		UMETA(Hidden),
+};
 
 UCLASS()
 class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementComponent
@@ -18,8 +27,15 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	{
 		typedef FSavedMove_Character Super;
 
+		// FLAGS
 		uint8 Saved_bWantsToSprint : 1;
 
+		// Non-Flags
+		uint8 Saved_bPrevWantsToCrouch : 1;
+		
+	public:
+		FSavedMove_Adv();
+		
 		virtual bool CanCombineWith(const FSavedMovePtr& newMove, ACharacter* InCharacter, float MaxDelta) const override;
 		virtual void Clear() override;
 		virtual uint8 GetCompressedFlags() const override;
@@ -40,24 +56,41 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 
 	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed;
 	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed;
+
+	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350;
+	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500;
+	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 5000;
+	UPROPERTY(EditDefaultsOnly) float Slide_Friction = 1.3;
 	
-	/// Custom data
+	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
+	
 	bool Safe_bWantsToSprint;
+	bool Safe_bPrevWantsToCrouch;
 
 
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
-	UAdvCharacterMovementComponent(const FObjectInitializer& ObjectInitializer);
+	virtual bool IsMovingOnGround() const override;
+	virtual bool CanCrouchInCurrentState() const override; 
+	UAdvCharacterMovementComponent();
 
-protected:
-	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
+private:
+	void EnterSlide();
+	void ExitSlide();
+	void PhysSlide(float deltaTime, int32 Iterations);
+	bool GetSlideSurface(FHitResult& Hit) const;
 	
+protected:
+	virtual void InitializeComponent() override;
+	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
+	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
 	
 	/// Custom blueprint export functions
 public:
 	UFUNCTION(BlueprintCallable) void SprintPressed();
 	UFUNCTION(BlueprintCallable) void SprintReleased();
-
 	UFUNCTION(BlueprintCallable) void CrouchPressed();
+	UFUNCTION(BlueprintCallable) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 };

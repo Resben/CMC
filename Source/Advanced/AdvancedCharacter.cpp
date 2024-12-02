@@ -1,6 +1,6 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "AdvancedCharacter.h"
+
+#include "AdvCharacterMovementComponent.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -55,6 +55,20 @@ AAdvancedCharacter::AAdvancedCharacter(const FObjectInitializer& ObjectInitializ
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+}
+
+// Helper function to ignore all actors attached to a character
+// Used when performing line traces for example
+FCollisionQueryParams AAdvancedCharacter::GetIgnoreCharacterParams() const
+{
+	FCollisionQueryParams Params;
+
+	TArray<AActor*> CharacterChildren;
+	GetAllChildActors(CharacterChildren);
+	Params.AddIgnoredActors(CharacterChildren);
+	Params.AddIgnoredActor(this);
+	
+	return Params;
 }
 
 //////////////////////////////////////////////////////////////////////////
