@@ -54,8 +54,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
-	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed;
-	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed;
+	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed = 1000;
+	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed = 500;
 
 	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350;
 	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500;
