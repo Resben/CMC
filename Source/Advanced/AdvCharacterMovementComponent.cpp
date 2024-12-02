@@ -212,7 +212,7 @@ bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode In
 
 #pragma endregion Blueprints
 
-#pragma region Custom Movement Mode
+#pragma region Slide
 
 void UAdvCharacterMovementComponent::EnterSlide()
 {
@@ -329,4 +329,61 @@ bool UAdvCharacterMovementComponent::GetSlideSurface(FHitResult& Hit) const
 	return GetWorld()->LineTraceSingleByProfile(Hit, Start, End, ProfileName, AdvancedCharacterOwner->GetIgnoreCharacterParams());
 }
 
-#pragma endregion Custom Movement Mode
+#pragma endregion Slide
+
+#pragma region Prone
+
+void UAdvCharacterMovementComponent::PhysProne(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+
+	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
+	{
+		Acceleration = FVector::ZeroVector;
+		Velocity = FVector::ZeroVector;
+		return;
+	}
+
+	bJustTeleported = false;
+	bool bCheckedFall = false;
+	bool bTriedLedgeMove = false;
+	float remainingTime = deltaTime;
+
+	while ((remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations) && CharacterOwner && (CharacterOwner->Controller || bRunPhysicsWithNoController || (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)))
+	{
+		// Using simulated time step for more accurate results
+		// Multiple calculations of movement over a single frame
+		Iterations++;
+		bJustTeleported = false;
+		const float timeTick = GetSimulationTimeStep(remainingTime, Iterations);
+		remainingTime -= timeTick;
+
+		// Get old values -> May need to revert if we go over a ledge
+		UPrimitiveComponent * const oldBase = GetMovementBase();
+		const FVector PreviousBaseLocation = (oldBase != nullptr) ? oldBase->GetComponentLocation() : FVector::ZeroVector;
+		const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+		const FFindFloorResult OldFloor = CurrentFloor;
+
+		// Ensure velocity is horizontal
+		MaintainHorizontalGroundVelocity();
+		const FVector OldVelocity = Velocity;
+		Acceleration.Z = 0.0f;
+
+		// Apply Acceleration
+		// Breaking deceleration friction that applies when you let go of the controls -> breaking
+		CalcVelocity(timeTick, GroundFriction, false, GetMaxBrakingDeceleration());
+
+		// Compute the move parameters
+		const FVector MoveVelocity = Velocity;
+		const FVector Delta = timeTick * MoveVelocity; // dx = v * dt
+		const bool bZeroDelta = Delta.IsNearlyZero();
+		FStepDownResult StepDownResult;
+
+		
+	}
+}
+
+#pragma endregion Prone

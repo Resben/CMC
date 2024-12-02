@@ -13,6 +13,7 @@ enum ECustomMovementMode
 {
 	CMOVE_None		UMETA(Hidden),
 	CMOVE_Slide		UMETA(DisplayName = "Slide"),
+	CMOVE_Prone		UMETA(DisplayName = "Prone"),
 	CMOVE_Max		UMETA(Hidden),
 };
 
@@ -54,13 +55,18 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
-	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed = 1000;
-	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed = 500;
+	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed = 1000.0f;
+	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed = 500.0f;
 
-	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350;
-	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500;
-	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 5000;
-	UPROPERTY(EditDefaultsOnly) float Slide_Friction = 1.3;
+	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 5000.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_Friction = 1.3f;
+
+	UPROPERTY(EditDefaultsOnly) float Prone_EnterHoldDuration = 0.2f;
+	UPROPERTY(EditDefaultsOnly) float Prone_SlideEnterImpulse = 300.0f;
+	UPROPERTY(EditDefaultsOnly) float Prone_MaxSpeed = 300.0f;
+	UPROPERTY(EditDefaultsOnly) float Prone_BreakingDeceleration = 2500.0f;
 	
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
 	
@@ -75,10 +81,17 @@ public:
 	UAdvCharacterMovementComponent();
 
 private:
+	// Slide
 	void EnterSlide();
 	void ExitSlide();
 	void PhysSlide(float deltaTime, int32 Iterations);
 	bool GetSlideSurface(FHitResult& Hit) const;
+
+	// Prone
+	void EnterProne(EMovementMode PrevMode, ECustomMovementMode PrevMovementMode);
+	void ExitProne();
+	bool CanProne() const;
+	void PhysProne(float deltaTime, int32 Iterations);
 	
 protected:
 	virtual void InitializeComponent() override;
