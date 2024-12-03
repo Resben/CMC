@@ -26,6 +26,15 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	/// Supports server authoritative behaviour
 	class FSavedMove_Adv : public FSavedMove_Character
 	{
+	public:
+		enum CompressedFlags
+		{
+			FLAG_Sprint		= 0x10,
+			FLAG_Custom_1	= 0x20,
+			FLAG_Custom_2	= 0x40,
+			FLAG_Custom_3	= 0x80,
+		};
+		
 		typedef FSavedMove_Character Super;
 
 		// FLAGS
@@ -33,8 +42,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 
 		// Non-Flags
 		uint8 Saved_bPrevWantsToCrouch : 1;
+		uint8 Saved_bWantsToProne : 1;
 		
-	public:
 		FSavedMove_Adv();
 		
 		virtual bool CanCombineWith(const FSavedMovePtr& newMove, ACharacter* InCharacter, float MaxDelta) const override;
@@ -55,29 +64,34 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
-	UPROPERTY(EditDefaultsOnly) float Sprint_MaxWalkSpeed = 1000.0f;
-	UPROPERTY(EditDefaultsOnly) float Walk_MaxWalkSpeed = 500.0f;
+	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 1000.0f;
+	UPROPERTY(EditDefaultsOnly) float Walk_MaxSpeed = 500.0f;
 
+	UPROPERTY(EditDefaultsOnly) float Slide_MaxSpeed = 400.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 5000.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_Friction = 1.3f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MaxBreakingDeceleration = 1000.0f;
 
 	UPROPERTY(EditDefaultsOnly) float Prone_EnterHoldDuration = 0.2f;
 	UPROPERTY(EditDefaultsOnly) float Prone_SlideEnterImpulse = 300.0f;
 	UPROPERTY(EditDefaultsOnly) float Prone_MaxSpeed = 300.0f;
-	UPROPERTY(EditDefaultsOnly) float Prone_BreakingDeceleration = 2500.0f;
-	
+	UPROPERTY(EditDefaultsOnly) float Prone_MaxBreakingDeceleration = 2500.0f;
+
+	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
-	
 	bool Safe_bWantsToSprint;
 	bool Safe_bPrevWantsToCrouch;
-
+	bool Safe_bWantsToProne;
+	FTimerHandle TimerHandle_EnterProne;
 
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual bool IsMovingOnGround() const override;
-	virtual bool CanCrouchInCurrentState() const override; 
+	virtual bool CanCrouchInCurrentState() const override;
+	virtual float GetMaxSpeed() const override;
+	virtual float GetMaxBrakingDeceleration() const override;
 	UAdvCharacterMovementComponent();
 
 private:
@@ -88,6 +102,9 @@ private:
 	bool GetSlideSurface(FHitResult& Hit) const;
 
 	// Prone
+	void TryEnterProne() { Safe_bWantsToProne = true; }
+	UFUNCTION(Server, Reliable) void Server_EnterProne();
+	
 	void EnterProne(EMovementMode PrevMode, ECustomMovementMode PrevMovementMode);
 	void ExitProne();
 	bool CanProne() const;
@@ -99,11 +116,16 @@ protected:
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
+	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 	
 	/// Custom blueprint export functions
 public:
 	UFUNCTION(BlueprintCallable) void SprintPressed();
 	UFUNCTION(BlueprintCallable) void SprintReleased();
 	UFUNCTION(BlueprintCallable) void CrouchPressed();
-	UFUNCTION(BlueprintCallable) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
+	UFUNCTION(BlueprintCallable) void CrouchReleased();
+
+	
+	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
+	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
 };
