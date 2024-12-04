@@ -64,14 +64,13 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
-	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 1000.0f;
-	UPROPERTY(EditDefaultsOnly) float Walk_MaxSpeed = 500.0f;
-
+	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 750.0f;
+	
 	UPROPERTY(EditDefaultsOnly) float Slide_MaxSpeed = 400.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 350.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 500.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 5000.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_Friction = 1.3f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 400.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 400.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 4000.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_FrictionFactor = 0.06f;
 	UPROPERTY(EditDefaultsOnly) float Slide_MaxBreakingDeceleration = 1000.0f;
 
 	UPROPERTY(EditDefaultsOnly) float Prone_EnterHoldDuration = 0.2f;
@@ -96,10 +95,10 @@ public:
 
 private:
 	// Slide
-	void EnterSlide();
+	void EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode);
 	void ExitSlide();
 	void PhysSlide(float deltaTime, int32 Iterations);
-	bool GetSlideSurface(FHitResult& Hit) const;
+	bool CanSlide() const;
 
 	// Prone
 	void TryEnterProne() { Safe_bWantsToProne = true; }
