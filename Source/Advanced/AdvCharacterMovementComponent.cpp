@@ -93,7 +93,7 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 			SetMovementMode(MOVE_Custom, CMOVE_Prone);
 			if (!CharacterOwner->HasAuthority()) Server_EnterProne(); // Not the server call EnterProne
 		}
-		Safe_bPrevWantsToCrouch = false;
+		Safe_bWantsToProne = false;
 	}
 	
 	if (IsCustomMovementMode(CMOVE_Prone) && !bWantsToCrouch)
