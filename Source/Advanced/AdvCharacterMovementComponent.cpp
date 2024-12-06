@@ -114,7 +114,7 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 	if (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Slide) ExitSlide();
 	
 	if (IsCustomMovementMode(CMOVE_Prone)) EnterProne(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
-	if (IsCustomMovementMode(CMOVE_Prone)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
+	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
 }
 
