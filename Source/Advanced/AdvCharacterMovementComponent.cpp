@@ -3,6 +3,7 @@
 #include "MaterialHLSLTree.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
+#include "Net/UnrealNetwork.h"
 
 #pragma region Character Movement Component
 
@@ -38,7 +39,8 @@ void UAdvCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 {
 	Super::UpdateFromCompressedFlags(Flags);
 
-	Safe_bWantsToSprint = (Flags & FSavedMove_Character::FLAG_Custom_0) != 0;
+	Safe_bWantsToSprint = (Flags & FSavedMove_Adv::FLAG_Sprint) != 0;
+	Safe_bWantsToDash = (Flags & FSavedMove_Adv::FLAG_Dash) != 0;
 }
 
 // After all the movement has been updated
@@ -83,6 +85,24 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	if (IsCustomMovementMode(CMOVE_Prone) && !bWantsToCrouch)
 	{
 		SetMovementMode(MOVE_Walking);
+	}
+
+	// -- DASH -- //
+	// On the server but not the servers controlled character
+	bool bAuthProxy = CharacterOwner->HasAuthority() && !CharacterOwner->IsLocallyControlled();
+	if (Safe_bWantsToDash && CanDash())
+	{
+		if (!bAuthProxy || GetWorld()->GetTimeSeconds() - DashStartTime > Dash_AuthCooldownDuration)
+		{
+			PerformDash();
+			Safe_bWantsToDash = false;
+			Proxy_bDashStart = !Proxy_bDashStart;
+		}
+		else
+		{
+			// The dash auth cooldown was too great was this player cheating???
+			UE_LOG(LogTemp, Warning, TEXT("Client tried to cheat"))
+		}
 	}
 
 	// Look here for more info on how the engine handles crouching
@@ -182,6 +202,11 @@ bool UAdvCharacterMovementComponent::FSavedMove_Adv::CanCombineWith(const FSaved
 	{
 		return false;
 	}
+
+	if (Saved_bWantsToDash != NewAdvMove->Saved_bWantsToDash)
+	{
+		return false;
+	}
 	
 	return FSavedMove_Character::CanCombineWith(newMove, InCharacter, MaxDelta);
 }
@@ -191,6 +216,10 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::Clear()
 	FSavedMove_Character::Clear();
 
 	Saved_bWantsToSprint = 0;
+	Saved_bWantsToDash = 0;
+
+	Saved_bWantsToProne = 0;
+	Saved_bPrevWantsToCrouch = 0;
 }
 
 uint8 UAdvCharacterMovementComponent::FSavedMove_Adv::GetCompressedFlags() const
@@ -198,7 +227,7 @@ uint8 UAdvCharacterMovementComponent::FSavedMove_Adv::GetCompressedFlags() const
 	uint8 Result = Super::GetCompressedFlags();
 
 	if (Saved_bWantsToSprint) Result |= FLAG_Sprint;
-
+	if (Saved_bWantsToDash) Result |= FLAG_Dash;
 
 	return Result;
 }
@@ -212,6 +241,7 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::SetMoveFor(ACharacter* C, f
 	Saved_bWantsToSprint = CharacterMovement->Safe_bWantsToSprint;
 	Saved_bPrevWantsToCrouch = CharacterMovement->Safe_bPrevWantsToCrouch;
 	Saved_bWantsToProne = CharacterMovement->Safe_bWantsToProne;
+	Saved_bWantsToDash = CharacterMovement->Safe_bWantsToDash;
 }
 
 void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
@@ -223,6 +253,7 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
 	CharacterMovement->Safe_bWantsToSprint = Saved_bWantsToSprint;
 	CharacterMovement->Safe_bPrevWantsToCrouch = Saved_bPrevWantsToCrouch;
 	CharacterMovement->Safe_bWantsToProne = Saved_bWantsToProne;
+	CharacterMovement->Safe_bWantsToDash = Saved_bWantsToDash;
 }
 
 #pragma endregion Save Move
@@ -262,6 +293,31 @@ void UAdvCharacterMovementComponent::CrouchPressed()
 void UAdvCharacterMovementComponent::CrouchReleased()
 {
 	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_EnterProne);
+}
+
+void UAdvCharacterMovementComponent::DashPressed()
+{
+	float CurrentTime = GetWorld()->GetTimeSeconds();
+	if (CurrentTime - DashStartTime >= Dash_CooldownDuration)
+	{
+		// Enough time has passed to dash again
+		Safe_bWantsToDash = true;
+	}
+	else
+	{
+		// If you are holding the dash then dash when remaining time is over by calling OnDashCooldownFinished
+		// Cleared if you release before the cooldown finishes
+		GetWorld()->GetTimerManager().SetTimer(TimerHandle_DashCooldown, this, &UAdvCharacterMovementComponent::OnDashCooldownFinished, Dash_CooldownDuration - (CurrentTime - DashStartTime));
+	}
+}
+
+void UAdvCharacterMovementComponent::DashReleased()
+{
+	// If we release the key before the cooldown timer then clear timer
+	// We still have DashStartTime to track the next press
+	// Timer is used if we are holding the press and want to dash ASAP
+	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_DashCooldown);
+	Safe_bWantsToDash = false;
 }
 
 bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
@@ -726,3 +782,58 @@ void UAdvCharacterMovementComponent::PhysProne(float deltaTime, int32 Iterations
 }
 
 #pragma endregion Prone
+
+#pragma region Dash
+
+void UAdvCharacterMovementComponent::OnDashCooldownFinished()
+{
+	Safe_bWantsToDash = true;
+}
+
+bool UAdvCharacterMovementComponent::CanDash() const
+{
+	return IsWalking() && !IsCrouching();
+}
+
+// Similar to launch here we can customise it
+// Launch is Velocity +=
+// Launch can be called in movement unsafe
+// Launch calls next frame
+void UAdvCharacterMovementComponent::PerformDash()
+{
+	DashStartTime = GetWorld()->GetTimeSeconds();
+
+	// If your stationary use the facing direction else use the direction you are moving
+	// Acceleration is the same as the input vector on the client -> no need for server rpc
+	FVector DashDirection = (Acceleration.IsNearlyZero() ? UpdatedComponent->GetForwardVector() : Acceleration).GetSafeNormal2D();
+	// Uses the fixed value use += for a combination of dash and movement
+	Velocity = Dash_Impulse * (DashDirection + FVector::UpVector * 0.1f);
+
+	// Face in dash direction 
+	FQuat NewRotation = FRotationMatrix::MakeFromXZ(DashDirection, FVector::UpVector).ToQuat();
+	FHitResult Hit;
+	SafeMoveUpdatedComponent(FVector::ZeroVector, NewRotation, false, Hit);
+
+	SetMovementMode(MOVE_Falling);
+
+	DashStartDelegate.Broadcast();
+}
+
+#pragma endregion Dash
+
+#pragma region Replication
+
+void UAdvCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bDashStart, COND_SkipOwner)
+}
+
+void UAdvCharacterMovementComponent::OnRep_DashStart()
+{
+	DashStartDelegate.Broadcast();
+}
+
+
+#pragma endregion Replication

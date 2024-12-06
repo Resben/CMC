@@ -8,6 +8,10 @@
 /// 2. You can never utilise non-movement safe variables in a movement safe function
 /// 3. You can't call non-movement safe functions that alter movement safe variables on the server
 
+// @todo look into delegates
+// An event that you can create and broadcast (A signal?)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDashStartDelegate);
+
 UENUM(BlueprintType)
 enum ECustomMovementMode
 {
@@ -30,15 +34,16 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		enum CompressedFlags
 		{
 			FLAG_Sprint		= 0x10,
-			FLAG_Custom_1	= 0x20,
-			FLAG_Custom_2	= 0x40,
-			FLAG_Custom_3	= 0x80,
+			FLAG_Dash		= 0x20,
+			FLAG_Custom_1	= 0x40,
+			FLAG_Custom_2	= 0x80,
 		};
 		
 		typedef FSavedMove_Character Super;
 
 		// FLAGS
 		uint8 Saved_bWantsToSprint : 1;
+		uint8 Saved_bWantsToDash : 1;
 
 		// Non-Flags
 		uint8 Saved_bPrevWantsToCrouch : 1;
@@ -78,12 +83,27 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Prone_MaxSpeed = 300.0f;
 	UPROPERTY(EditDefaultsOnly) float Prone_MaxBreakingDeceleration = 2500.0f;
 
+	UPROPERTY(EditDefaultsOnly) float Dash_Impulse = 1000.0f;
+	UPROPERTY(EditDefaultsOnly) float Dash_CooldownDuration = 1.0f;
+	// Prevents cheating by making sure cooldown is not half for example it's dash time allowing for a margin of
+	// error of 0.1f since DeltaTime is actually not perfectly synced on the client and server
+	UPROPERTY(EditDefaultsOnly) float Dash_AuthCooldownDuration = 0.9f;
+	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
+	
 	bool Safe_bWantsToSprint;
 	bool Safe_bPrevWantsToCrouch;
 	bool Safe_bWantsToProne;
+	bool Safe_bWantsToDash;
+	
+	float DashStartTime;
+	
 	FTimerHandle TimerHandle_EnterProne;
+	FTimerHandle TimerHandle_DashCooldown;
+
+	// Replication
+	UPROPERTY(ReplicatedUsing=OnRep_DashStart) bool Proxy_bDashStart;
 
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
@@ -108,6 +128,11 @@ private:
 	void ExitProne();
 	bool CanProne() const;
 	void PhysProne(float deltaTime, int32 Iterations);
+
+	// Dash
+	void OnDashCooldownFinished();
+	bool CanDash() const;
+	void PerformDash();
 	
 protected:
 	virtual void InitializeComponent() override;
@@ -119,12 +144,22 @@ protected:
 	
 	/// Custom blueprint export functions
 public:
+	UPROPERTY(BlueprintAssignable) FDashStartDelegate DashStartDelegate;
+	
 	UFUNCTION(BlueprintCallable) void SprintPressed();
 	UFUNCTION(BlueprintCallable) void SprintReleased();
 	UFUNCTION(BlueprintCallable) void CrouchPressed();
 	UFUNCTION(BlueprintCallable) void CrouchReleased();
+	UFUNCTION(BlueprintCallable) void DashPressed();
+	UFUNCTION(BlueprintCallable) void DashReleased();
 
 	
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
+
+	// Can move replication to the base character to save bandwidth
+public:
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
+private:
+	UFUNCTION() void OnRep_DashStart();
 };
