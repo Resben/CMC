@@ -69,6 +69,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
+	UPROPERTY(EditDefaultsOnly) bool Setting_ShouldUsePhysicsDash = false;
+	UPROPERTY(EditDefaultsOnly) bool Setting_GravityEnabledDash = true;
 	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 750.0f;
 	
 	UPROPERTY(EditDefaultsOnly) float Slide_MaxSpeed = 400.0f;
@@ -88,6 +90,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	// Prevents cheating by making sure cooldown is not half for example it's dash time allowing for a margin of
 	// error of 0.1f since DeltaTime is actually not perfectly synced on the client and server
 	UPROPERTY(EditDefaultsOnly) float Dash_AuthCooldownDuration = 0.9f;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Dash_Montage;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
@@ -132,7 +135,8 @@ private:
 	// Dash
 	void OnDashCooldownFinished();
 	bool CanDash() const;
-	void PerformDash();
+	void PerformPhysicsDash();
+	void PerformMontageDash();
 	
 protected:
 	virtual void InitializeComponent() override;

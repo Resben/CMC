@@ -47,6 +47,10 @@ void UAdvCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 void UAdvCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity)
 {
 	Super::OnMovementUpdated(DeltaSeconds, OldLocation, OldVelocity);
+
+	// Switch back to walking after our root animation has finished
+	// NOTE an example of NOT using TIME
+	if (IsMovementMode(MOVE_Flying) && !HasRootMotionSources()) SetMovementMode(MOVE_Walking);
 	
 	// Set after movement so valid for the next frame
 	Safe_bPrevWantsToCrouch = bWantsToCrouch;
@@ -94,7 +98,9 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		if (!bAuthProxy || GetWorld()->GetTimeSeconds() - DashStartTime > Dash_AuthCooldownDuration)
 		{
-			PerformDash();
+			if (Setting_ShouldUsePhysicsDash) PerformPhysicsDash();
+			else PerformMontageDash();
+			
 			Safe_bWantsToDash = false;
 			Proxy_bDashStart = !Proxy_bDashStart;
 		}
@@ -792,14 +798,14 @@ void UAdvCharacterMovementComponent::OnDashCooldownFinished()
 
 bool UAdvCharacterMovementComponent::CanDash() const
 {
-	return IsWalking() && !IsCrouching();
+	return IsWalking() && !IsCrouching() || IsFalling();
 }
 
 // Similar to launch here we can customise it
 // Launch is Velocity +=
 // Launch can be called in movement unsafe
 // Launch calls next frame
-void UAdvCharacterMovementComponent::PerformDash()
+void UAdvCharacterMovementComponent::PerformPhysicsDash()
 {
 	DashStartTime = GetWorld()->GetTimeSeconds();
 
@@ -819,6 +825,17 @@ void UAdvCharacterMovementComponent::PerformDash()
 	DashStartDelegate.Broadcast();
 }
 
+void UAdvCharacterMovementComponent::PerformMontageDash()
+{
+	DashStartTime = GetWorld()->GetTimeSeconds();
+	
+	if (Setting_GravityEnabledDash) SetMovementMode(MOVE_Falling);
+	else SetMovementMode(MOVE_Flying);
+	
+	CharacterOwner->PlayAnimMontage(Dash_Montage);
+	DashStartDelegate.Broadcast();
+}
+
 #pragma endregion Dash
 
 #pragma region Replication
@@ -832,6 +849,7 @@ void UAdvCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<class FLi
 
 void UAdvCharacterMovementComponent::OnRep_DashStart()
 {
+	CharacterOwner->PlayAnimMontage(Dash_Montage);
 	DashStartDelegate.Broadcast();
 }
 
