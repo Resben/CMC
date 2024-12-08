@@ -44,10 +44,13 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		// FLAGS
 		uint8 Saved_bWantsToSprint : 1;
 		uint8 Saved_bWantsToDash : 1;
+		uint8 Saved_bPressedAdvanceJump : 1;
 
 		// Non-Flags
 		uint8 Saved_bPrevWantsToCrouch : 1;
 		uint8 Saved_bWantsToProne : 1;
+		uint8 Saved_bHadAnimRootMotion : 1;
+		uint8 Saved_bTransitionFinished : 1;
 		
 		FSavedMove_Adv();
 		
@@ -91,22 +94,47 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	// error of 0.1f since DeltaTime is actually not perfectly synced on the client and server
 	UPROPERTY(EditDefaultsOnly) float Dash_AuthCooldownDuration = 0.9f;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Dash_Montage;
+
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxDistance = 200;
+	UPROPERTY(EditDefaultsOnly) float Mantle_ReachHeight = 50;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinDepth = 30;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinWallSteepnessAngle = 75;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxSurfaceAngle = 40;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxAlignmentAngle = 45;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyTallMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ShortMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionShortMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyShortMontage;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
-	
+
+	// Flags
 	bool Safe_bWantsToSprint;
-	bool Safe_bPrevWantsToCrouch;
 	bool Safe_bWantsToProne;
 	bool Safe_bWantsToDash;
+
+	// Non-Flags
+	bool Safe_bPrevWantsToCrouch;
+	bool Safe_bHadAnimRootMotion;
+
+	bool Safe_bTransitionFinished;
+	TSharedPtr<FRootMotionSource_MoveToForce> TransitionRMS;
+	UPROPERTY(Transient) UAnimMontage* TransitionQueuedMontage;
+	float TransitionQueuedMontageSpeed;
+	int TransitionRMS_ID;
 	
 	float DashStartTime;
-	
 	FTimerHandle TimerHandle_EnterProne;
 	FTimerHandle TimerHandle_DashCooldown;
-
+	
 	// Replication
 	UPROPERTY(ReplicatedUsing=OnRep_DashStart) bool Proxy_bDashStart;
+
+	UPROPERTY(ReplicatedUsing=OnRep_ShortMantle) bool Proxy_bShortMantle;
+	UPROPERTY(ReplicatedUsing=OnRep_TallMantle) bool Proxy_bTallMantle;
 
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
@@ -137,12 +165,23 @@ private:
 	bool CanDash() const;
 	void PerformPhysicsDash();
 	void PerformMontageDash();
+
+	// Mantle
+	bool TryMantle();
+	FVector GetMantleStartLocation(FHitResult FrontHit, FHitResult SurfaceHit, bool bTallMantle) const;
+
+	// Helpers
+	bool IsServer() const;
+	float CapR() const;
+	float CapHH() const;
+	
 	
 protected:
 	virtual void InitializeComponent() override;
 	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 	
@@ -166,4 +205,6 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 private:
 	UFUNCTION() void OnRep_DashStart();
+	UFUNCTION() void OnRep_ShortMantle();
+	UFUNCTION() void OnRep_TallMantle();
 };

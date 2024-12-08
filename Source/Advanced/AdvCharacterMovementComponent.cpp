@@ -4,6 +4,21 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
+#include "DrawDebugHelpers.h"
+
+// Helper Macros
+#if 1
+float MacroDuration = 2.f;
+#define SLOG(x) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, FColor::Yellow, x);
+#define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
+#define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
+#define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
+#else
+#define SLOG(x)
+#define POINT(x, c)
+#define LINE(x1, x2, c)
+#define CAPSULE(x, c)
+#endif
 
 #pragma region Character Movement Component
 
@@ -111,8 +126,61 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 		}
 	}
 
+	if (AdvancedCharacterOwner->bPressedAdvancedJump)
+	{
+		if (TryMantle())
+		{
+			AdvancedCharacterOwner->StopJumping();
+		}
+		else
+		{
+			AdvancedCharacterOwner->bPressedAdvancedJump = false;
+			CharacterOwner->bPressedJump = true;
+			CharacterOwner->CheckJumpInput(DeltaSeconds);
+		}
+	}
+
+	if (Safe_bTransitionFinished)
+	{
+		SLOG("Transition finished")
+		UE_LOG(LogTemp, Warning, TEXT("FINISHED RM"))
+		if (IsValid(TransitionQueuedMontage))
+		{
+			SetMovementMode(MOVE_Flying);
+			CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
+			TransitionQueuedMontageSpeed = 0.0f;
+			TransitionQueuedMontage = nullptr;
+		}
+		else
+		{
+			SetMovementMode(MOVE_Walking);
+		}
+		Safe_bTransitionFinished = false;
+	}
+
 	// Look here for more info on how the engine handles crouching
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
+}
+
+void UAdvCharacterMovementComponent::UpdateCharacterStateAfterMovement(float DeltaSeconds)
+{
+	Super::UpdateCharacterStateAfterMovement(DeltaSeconds);
+
+	// After mantle finished go back to Walking
+	if (!HasAnimRootMotion() && Safe_bHadAnimRootMotion && IsMovementMode(MOVE_Flying))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ending Anim Root Motion"))
+		SetMovementMode(MOVE_Walking);
+	}
+	// You can't check for ERootMontionSourceStatusFlags::Finished in UpdateCharacterStateBeforeMovement since RootMotion is cleaned up before that function is called
+	// So we save that in the Safe variable Safe_bTransitionFinished
+	if (GetRootMotionSourceByID(TransitionRMS_ID) && GetRootMotionSourceByID(TransitionRMS_ID)->Status.HasFlag(ERootMotionSourceStatusFlags::Finished))
+	{
+		RemoveRootMotionSourceByID(TransitionRMS_ID);
+		Safe_bTransitionFinished = true;
+	}
+
+	Safe_bHadAnimRootMotion = HasAnimRootMotion();
 }
 
 void UAdvCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
@@ -223,7 +291,11 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::Clear()
 
 	Saved_bWantsToSprint = 0;
 	Saved_bWantsToDash = 0;
-
+	Saved_bPressedAdvanceJump = 0;
+	
+	Saved_bHadAnimRootMotion = 0;
+	Saved_bTransitionFinished = 0;
+	
 	Saved_bWantsToProne = 0;
 	Saved_bPrevWantsToCrouch = 0;
 }
@@ -234,6 +306,7 @@ uint8 UAdvCharacterMovementComponent::FSavedMove_Adv::GetCompressedFlags() const
 
 	if (Saved_bWantsToSprint) Result |= FLAG_Sprint;
 	if (Saved_bWantsToDash) Result |= FLAG_Dash;
+	if (Saved_bPressedAdvanceJump) Result |= FLAG_JumpPressed;
 
 	return Result;
 }
@@ -248,6 +321,10 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::SetMoveFor(ACharacter* C, f
 	Saved_bPrevWantsToCrouch = CharacterMovement->Safe_bPrevWantsToCrouch;
 	Saved_bWantsToProne = CharacterMovement->Safe_bWantsToProne;
 	Saved_bWantsToDash = CharacterMovement->Safe_bWantsToDash;
+
+	Saved_bPressedAdvanceJump = CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump;
+	Saved_bHadAnimRootMotion = CharacterMovement->Safe_bHadAnimRootMotion;
+	Saved_bTransitionFinished = CharacterMovement->Safe_bTransitionFinished;
 }
 
 void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
@@ -260,6 +337,10 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
 	CharacterMovement->Safe_bPrevWantsToCrouch = Saved_bPrevWantsToCrouch;
 	CharacterMovement->Safe_bWantsToProne = Saved_bWantsToProne;
 	CharacterMovement->Safe_bWantsToDash = Saved_bWantsToDash;
+
+	CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump = Saved_bPressedAdvanceJump;
+	CharacterMovement->Safe_bHadAnimRootMotion = Saved_bHadAnimRootMotion;
+	CharacterMovement->Safe_bTransitionFinished = Saved_bTransitionFinished;
 }
 
 #pragma endregion Save Move
@@ -337,6 +418,25 @@ bool UAdvCharacterMovementComponent::IsMovementMode(EMovementMode InMovementMode
 }
 
 #pragma endregion Blueprints
+
+#pragma region Helpers
+
+bool UAdvCharacterMovementComponent::IsServer() const
+{
+	return CharacterOwner->HasAuthority();
+}
+
+float UAdvCharacterMovementComponent::CapR() const
+{
+	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius();
+}
+
+float UAdvCharacterMovementComponent::CapHH() const
+{
+	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+}
+
+#pragma endregion Helpers
 
 #pragma region Slide
 
@@ -838,6 +938,198 @@ void UAdvCharacterMovementComponent::PerformMontageDash()
 
 #pragma endregion Dash
 
+#pragma region Mantle
+
+bool UAdvCharacterMovementComponent::TryMantle()
+{
+	// Conditions for allowing the Mantle
+	if (!(IsMovementMode(MOVE_Walking) && !IsCrouching()) && !IsMovementMode(MOVE_Falling)) return false;
+
+	// Helper variables
+
+	// Get the bottom of the capsule
+	FVector BaseLoc = UpdatedComponent->GetComponentLocation() + FVector::DownVector * CapHH();
+	FVector Fwd = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	float MaxHeight = CapHH() * 2 + Mantle_ReachHeight;
+	// Minimum steepness we are going to tolerate
+	float CosMMWSA = FMath::Cos(FMath::DegreesToRadians(Mantle_MinWallSteepnessAngle));
+	float CosMMSA = FMath::Cos(FMath::DegreesToRadians(Mantle_MaxSurfaceAngle));
+	// Max alignment of player to wall to mantle
+	float CosMMAA = FMath::Cos(FMath::DegreesToRadians(Mantle_MaxAlignmentAngle));
+
+	SLOG("Starting Mantle Attempt")
+
+	int numberOfLineTraces = 5;
+
+	// ---- FRONT TRACE ---- //
+	// Check the front face (Wall that is in front of you)
+	FHitResult FrontHit;
+	// We want a longer check distance if the character has velocity toward the forward vector (which is the direction we check the wall for)
+	// And a shorter check distance if the character velocity is in the opposite direction of the forward vector
+	// We clamp this check distance to CapR + 30 minimum and Mantle_MaxDistance maximum based on the Velocity | Fwd
+	float CheckDistance = FMath::Clamp(Velocity | Fwd, CapR() + 30, Mantle_MaxDistance);
+	// We want to mantle it if it is above the max step height so we start how checks from here up
+	FVector FrontStart = BaseLoc + FVector::UpVector * (MaxStepHeight - 1);
+	for (int i = 0; i < numberOfLineTraces + 1; i++)
+	{
+		LINE(FrontStart, FrontStart + Fwd * CheckDistance, FColor::Red)
+		if (GetWorld()->LineTraceSingleByProfile(FrontHit, FrontStart, FrontStart + Fwd * CheckDistance, "BlockAll", Params)) break;
+		FrontStart += FVector::UpVector * (2.0f * CapHH() - (MaxStepHeight - 1)) / numberOfLineTraces;
+	}
+	if (!FrontHit.IsValidBlockingHit()) return false;
+	// Get the steepness of the Normal of the hit
+	float CosWallSteepnessAngle = FrontHit.Normal | FVector::UpVector;
+	// First check is for the steepness of the wall the second check is for the angle of the wall to the player i.e. how close is your fwd to being perpendicular to the wall
+	// So we get the minus of the hit (so about the same direction as fwd)
+	if (FMath::Abs(CosWallSteepnessAngle) > CosMMWSA || (Fwd | -FrontHit.Normal) < CosMMAA) return false;
+	POINT(FrontHit.Location, FColor::Red);
+
+	// ---- TOP TRACE ---- //
+	TArray<FHitResult> HeightHits;
+	FHitResult SurfaceHit;
+	// The point in which we want to get to in order to mantle may not be directly up in the case in which the wall has some slant
+	// Therefor we must project the world up vector onto the surface normal and there we can follow it up to the top of this plane to get
+	// where we want to mantle onto (@ 51 minutes)
+	FVector WallUp = FVector::VectorPlaneProject(FVector::UpVector, FrontHit.Normal).GetSafeNormal();
+	float WallCos = FVector::UpVector | FrontHit.Normal;
+	float WallSin = FMath::Sqrt(1 - WallCos * WallCos);
+	// Hit -> Move into the wall by 3 Fwd (So we can detect very thin starts NOT SUPER EFFECTIVE instead try move in by half distance? come back to this later) @todo
+	// -> Up the wall in the direction of WallUp till max height minus min height -> ?? WallSin ?? @todo
+	FVector TraceStart = FrontHit.Location + (Fwd * 3) + WallUp * (MaxHeight - (MaxStepHeight - 1)) / WallSin;
+	LINE(TraceStart, FrontHit.Location + Fwd, FColor::Orange)
+
+	// Get multiple collision points in case there is something above that mantle wall
+	if (!GetWorld()->LineTraceMultiByProfile(HeightHits, TraceStart, FrontHit.Location + Fwd, "BlockAll", Params)) return false;
+
+	for (const FHitResult Hit : HeightHits)
+	{
+		// Was not one of the hits inside an object
+		if (Hit.IsValidBlockingHit())
+		{
+			SurfaceHit = Hit;
+			break;
+		}
+	}
+
+	// Limit to the angle which can be mantled on
+	if (!SurfaceHit.IsValidBlockingHit() || (SurfaceHit.Normal | FVector::UpVector) < CosMMSA) return false;
+	// @todo review
+	float Height = (SurfaceHit.Location - BaseLoc) | FVector::UpVector;
+
+	SLOG(FString::Printf(TEXT("Height: %f"), Height))
+	POINT(SurfaceHit.Location, FColor::Blue)
+
+	if (Height > MaxHeight) return false;
+
+	// ---- CHECK CLEARANCE ---- //
+	// Angle of the surface
+	float SurfaceCos = FVector::UpVector | SurfaceHit.Normal;
+	float SurfaceSin = FMath::Sqrt(1 - SurfaceCos * SurfaceCos);
+	// Location to place the test capsule
+	// Move the capsule by the Fwd of the Capsule radius so they are fully on the geometry
+	// Up vector multiplied by the height adding the height of the surface angle (Accounts for the height caused by the angle of the surface)
+	FVector ClearCapLoc = SurfaceHit.Location + Fwd * CapR() + FVector::UpVector * (CapHH() + 1 + CapR() * 2 * SurfaceSin);
+	FCollisionShape CapShape = FCollisionShape::MakeCapsule(CapR(), CapHH());
+	if (GetWorld()->OverlapAnyTestByProfile(ClearCapLoc, FQuat::Identity, "BlockAll", CapShape, Params))
+	{
+		CAPSULE(ClearCapLoc, FColor::Red)
+		return false;
+	}
+
+	CAPSULE(ClearCapLoc, FColor::Green)
+	SLOG("Can Mantle")
+
+	FVector ShortMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, false);
+	FVector TallMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, true);
+
+	bool bTallMantle = false;
+	// If the ledge is above the head of the character
+	if (IsMovementMode(MOVE_Walking) && Height > CapHH() * 2)
+		bTallMantle = true;
+	// If we are falling and Velocity is downward
+	else if (IsMovementMode(MOVE_Falling) && (Velocity | FVector::UpVector) < 0)
+	{
+		// Don't want to tall mantle if the object is not tall enough for the tall mantle animation which is capsule height
+		if (!GetWorld()->OverlapAnyTestByProfile(TallMantleTarget, FQuat::Identity, "BlockAll", CapShape, Params))
+			bTallMantle = true;
+	}
+
+	FVector TransitionTarget = bTallMantle ? TallMantleTarget : ShortMantleTarget;
+	CAPSULE(TransitionTarget, FColor::Yellow)
+	// Perform Transition to Mantle
+	CAPSULE(UpdatedComponent->GetComponentLocation(), FColor::Red)
+
+	// The transition montage speed is controlled by the current UpSpeed
+	// If the character was moving upward then we speed up the transition
+	// If the character was moving downward then we slow down the transtion
+	// Makes it feel more realistic
+	float UpSpeed = Velocity | FVector::UpVector;
+	float TransDistance = FVector::Dist(TransitionTarget, UpdatedComponent->GetComponentLocation());
+	TransitionQueuedMontageSpeed = FMath::GetMappedRangeValueClamped(FVector2D(-500, 750), FVector2D(0.9f, 1.2f), UpSpeed);
+	// Delete the old RMS from the SharedPTR and create a new one
+	// RootMotionSource kind of like a tween to drive the capsule from start to target position
+	TransitionRMS.Reset();
+	TransitionRMS = MakeShared<FRootMotionSource_MoveToForce>();
+	// No accumulation
+	TransitionRMS->AccumulateMode = ERootMotionAccumulateMode::Override;
+
+	// Duration of the transition based on how far you are away from the target distance
+	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, 0.1f, 0.25f);
+	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
+	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
+	TransitionRMS->TargetLocation = TransitionTarget;
+
+	// Zero out the Velocity
+	Velocity = FVector::ZeroVector;
+	// Remove gravity application
+	SetMovementMode(MOVE_Flying);
+	TransitionRMS_ID = ApplyRootMotionSource(TransitionRMS);
+
+	// Queue animations
+	// Transition Montages are NOT root animations
+	// Transition Montages are 1 second and the speed can be scaled based on the TransitionRMS Duration
+	if (bTallMantle)
+	{
+		TransitionQueuedMontage = Mantle_TallMontage;
+		CharacterOwner->PlayAnimMontage(Mantle_TransitionTallMontage, 1 / TransitionRMS->Duration);
+		if (IsServer()) Proxy_bTallMantle = !Proxy_bTallMantle;
+	}
+	else
+	{
+		TransitionQueuedMontage = Mantle_ShortMontage;
+		CharacterOwner->PlayAnimMontage(Mantle_TransitionShortMontage, 1 / TransitionRMS->Duration);
+		if (IsServer()) Proxy_bShortMantle = !Proxy_bShortMantle;
+	}
+	
+	return true;
+}
+
+FVector UAdvCharacterMovementComponent::GetMantleStartLocation(FHitResult FrontHit, FHitResult SurfaceHit, bool bTallMantle) const
+{
+	// Working backwards from the top point to the point in which the capsule must be transitioned to in order to start the animation
+	
+	float CosWallSteepnessAngle = FrontHit.Normal | FVector::UpVector;
+	float DownDistance = bTallMantle ? CapHH() * 2.0f : MaxStepHeight - 1;
+	FVector EdgeTangent = FVector::CrossProduct(SurfaceHit.Normal, FrontHit.Normal).GetSafeNormal();
+	// 1. Start at the surface hit location
+	// 2. Move backwards so capsule is lined up with wall
+	// 3. Instead of having the character move more towards where they are looking move the position so it is closer to the capsule using the edge tangent and at a value of 0.3 (looks better)
+	// 4. Move the capsule UP so it is inline with the surface hit
+	// 5. Move the capsule DOWN depending on what kind of mantle we are going for
+	// 6. Move the capsule to adjust for the steepness of the wall it is mantling (not beneath/inside the wall because of its angle)
+	FVector MantleStart = SurfaceHit.Location;
+	MantleStart += FrontHit.Normal.GetSafeNormal2D() * (2.0f + CapR());
+	MantleStart += UpdatedComponent->GetForwardVector().GetSafeNormal2D().ProjectOnTo(EdgeTangent) * CapR() * 0.3f;
+	MantleStart += FVector::UpVector * CapHH();
+	MantleStart += FVector::DownVector * DownDistance;
+	MantleStart += FrontHit.Normal.GetSafeNormal2D() * CosWallSteepnessAngle;
+
+	return MantleStart;
+}
+
+#pragma endregion Mantle
+
 #pragma region Replication
 
 void UAdvCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
@@ -845,6 +1137,8 @@ void UAdvCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<class FLi
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bDashStart, COND_SkipOwner)
+	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bShortMantle, COND_SkipOwner)
+	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bTallMantle, COND_SkipOwner)
 }
 
 void UAdvCharacterMovementComponent::OnRep_DashStart()
@@ -853,5 +1147,14 @@ void UAdvCharacterMovementComponent::OnRep_DashStart()
 	DashStartDelegate.Broadcast();
 }
 
+void UAdvCharacterMovementComponent::OnRep_ShortMantle()
+{
+	CharacterOwner->PlayAnimMontage(Mantle_ProxyShortMontage);
+}
+
+void UAdvCharacterMovementComponent::OnRep_TallMantle()
+{
+	CharacterOwner->PlayAnimMontage(Mantle_ProxyTallMontage);
+}
 
 #pragma endregion Replication

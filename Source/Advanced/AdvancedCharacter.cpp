@@ -73,6 +73,22 @@ FCollisionQueryParams AAdvancedCharacter::GetIgnoreCharacterParams() const
 	return Params;
 }
 
+void AAdvancedCharacter::Jump()
+{
+	Super::Jump();
+
+	bPressedAdvancedJump = true;
+
+	bPressedJump = false;
+}
+
+void AAdvancedCharacter::StopJumping()
+{
+	Super::StopJumping();
+
+	bPressedAdvancedJump = false;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Input
 

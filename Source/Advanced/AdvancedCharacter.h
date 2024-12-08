@@ -51,6 +51,11 @@ protected:
 public:
 	AAdvancedCharacter(const FObjectInitializer& ObjectInitializer);
 	FCollisionQueryParams GetIgnoreCharacterParams() const;
+
+	virtual void Jump() override;
+	virtual void StopJumping() override;
+	
+	bool bPressedAdvancedJump; 
 	
 	/// END OF CUSTOM ///
 	
