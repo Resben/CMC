@@ -158,6 +158,12 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 		Safe_bTransitionFinished = false;
 	}
 
+	// -- WALL RUN -- //
+	if (IsFalling())
+	{
+		TryWallRun();
+	}
+
 	// Look here for more info on how the engine handles crouching
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 }
@@ -195,6 +201,9 @@ void UAdvCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteration
 	case CMOVE_Prone:
 		PhysProne(deltaTime, Iterations);
 		break;
+	case CMOVE_WallRun:
+		PhysWallRun(deltaTime, Iterations);
+		break;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 	}
@@ -210,6 +219,16 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 	if (IsCustomMovementMode(CMOVE_Prone)) EnterProne(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
+	// Simulated proxies will get OnMovementModeChanged triggered because custom movement mode is a replicated variable
+	// So instead do your own calculations to avoid using unnecessary bandwidth
+	if (IsWallRunning() && GetOwnerRole() == ROLE_SimulatedProxy)
+	{
+		FVector Start = UpdatedComponent->GetComponentLocation();
+		FVector End = UpdatedComponent->GetComponentLocation();
+		auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+		FHitResult WallHit;
+		Safe_bWallRunIsRight = GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+	}
 }
 
 bool UAdvCharacterMovementComponent::IsMovingOnGround() const
@@ -236,6 +255,8 @@ float UAdvCharacterMovementComponent::GetMaxSpeed() const
 		return Slide_MaxSpeed; 
 	case CMOVE_Prone:
 		return Prone_MaxSpeed;
+	case CMOVE_WallRun:
+		return WallRun_MaxSpeed;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 		return -1.0f;
@@ -252,10 +273,42 @@ float UAdvCharacterMovementComponent::GetMaxBrakingDeceleration() const
 		return Slide_MaxBreakingDeceleration;
 	case CMOVE_Prone:
 		return Prone_MaxBreakingDeceleration;
+	case CMOVE_WallRun:
+		return 0.0f;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 		return -1.0f;
 	}
+}
+
+bool UAdvCharacterMovementComponent::CanAttemptJump() const
+{
+	return Super::CanAttemptJump() || IsWallRunning();
+}
+
+bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
+{
+	// DoJump calls SetMovementMode(MOVE_Falling) so store it here
+	bool bWasWallRunning = IsWallRunning();
+	if (Super::DoJump(bReplayingMoves))
+	{
+		if (bWasWallRunning)
+		{
+			// Determine which side of the wall we are jumping off
+			// Jump off wall based off normal
+			FVector Start = UpdatedComponent->GetComponentLocation();
+			FVector CastDelta = UpdatedComponent->GetRightVector() * CapR() * 2;
+			FVector End = Safe_bWallRunIsRight ? Start + CastDelta : Start - CastDelta;
+			auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+			FHitResult WallHit;
+			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+			Velocity += WallHit.Normal * WallRun_JumpOffForce;
+		}
+
+		return true;
+	}
+	
+	return false;
 }
 
 #pragma endregion Character Movement Component
@@ -281,6 +334,11 @@ bool UAdvCharacterMovementComponent::FSavedMove_Adv::CanCombineWith(const FSaved
 	{
 		return false;
 	}
+
+	if (Saved_bWallRunIsRight != NewAdvMove->Saved_bWallRunIsRight)
+	{
+		return false;
+	}
 	
 	return FSavedMove_Character::CanCombineWith(newMove, InCharacter, MaxDelta);
 }
@@ -298,6 +356,8 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::Clear()
 	
 	Saved_bWantsToProne = 0;
 	Saved_bPrevWantsToCrouch = 0;
+
+	Saved_bWallRunIsRight = 0;
 }
 
 uint8 UAdvCharacterMovementComponent::FSavedMove_Adv::GetCompressedFlags() const
@@ -321,6 +381,7 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::SetMoveFor(ACharacter* C, f
 	Saved_bPrevWantsToCrouch = CharacterMovement->Safe_bPrevWantsToCrouch;
 	Saved_bWantsToProne = CharacterMovement->Safe_bWantsToProne;
 	Saved_bWantsToDash = CharacterMovement->Safe_bWantsToDash;
+	Saved_bWallRunIsRight = CharacterMovement->Safe_bWallRunIsRight;
 
 	Saved_bPressedAdvanceJump = CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump;
 	Saved_bHadAnimRootMotion = CharacterMovement->Safe_bHadAnimRootMotion;
@@ -337,6 +398,7 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
 	CharacterMovement->Safe_bPrevWantsToCrouch = Saved_bPrevWantsToCrouch;
 	CharacterMovement->Safe_bWantsToProne = Saved_bWantsToProne;
 	CharacterMovement->Safe_bWantsToDash = Saved_bWantsToDash;
+	CharacterMovement->Safe_bWallRunIsRight = Saved_bWallRunIsRight;
 
 	CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump = Saved_bPressedAdvanceJump;
 	CharacterMovement->Safe_bHadAnimRootMotion = Saved_bHadAnimRootMotion;
@@ -1129,6 +1191,165 @@ FVector UAdvCharacterMovementComponent::GetMantleStartLocation(FHitResult FrontH
 }
 
 #pragma endregion Mantle
+
+#pragma region Wall Run
+
+bool UAdvCharacterMovementComponent::TryWallRun()
+{
+	// Must be falling
+	// Horizontal velocity must be faster than Min Speed
+	// Prevents wall run if you have high vertical velocity (Can be changed to what you see fit)
+	if (!IsFalling()) return false;
+	if (Velocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2)) return false;
+	if (Velocity.Z < -WallRun_MaxVerticalSpeed) return false;
+
+	// Set line hits for left and right
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector LeftEnd = Start - UpdatedComponent->GetRightVector() * CapR() * 2;
+	FVector RightEnd = Start + UpdatedComponent->GetRightVector() * CapHH() * 2;
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	FHitResult FloorHit, WallHit;
+
+	// Check height
+	if (GetWorld()->LineTraceSingleByProfile(FloorHit, Start, Start + FVector::DownVector * (CapHH() + WallRun_MinHeight), "BlockAll", Params)) return false;
+
+	// Left Cast
+	GetWorld()->LineTraceSingleByProfile(WallHit, Start, LeftEnd, "BlockAll", Params);
+	// Velocity must be point at the wall to some degree just not away from the wall
+	if (WallHit.IsValidBlockingHit() && (Velocity | WallHit.Normal) < 0)
+	{
+		Safe_bWallRunIsRight = false;
+	}
+	else
+	{
+		// Right Cast
+		GetWorld()->LineTraceSingleByProfile(WallHit, Start, RightEnd, "BlockAll", Params);
+		if (WallHit.IsValidBlockingHit() && (Velocity | WallHit.Normal) < 0)
+		{
+			Safe_bWallRunIsRight = true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	// The velocity vector projected onto the plane of the wall
+	FVector ProjectedVelocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
+
+	// More restrictive than the first check for MinSpeed
+	if (ProjectedVelocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2)) return false;
+
+	// Passed all conditions enter wall run
+	Velocity = ProjectedVelocity;
+	Velocity.Z = FMath::Clamp(Velocity.Z, 0.0f, WallRun_MaxVerticalSpeed);
+	SetMovementMode(MOVE_Custom, CMOVE_WallRun);
+	SLOG("Starting Wall Run");
+	return true;
+}
+
+void UAdvCharacterMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
+	{
+		Acceleration = FVector::ZeroVector;
+		Velocity = FVector::ZeroVector;
+		return;
+	}
+	
+	bJustTeleported = false;
+	float remainingTime = deltaTime;
+	// Perform the move
+	while ( (remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations) && CharacterOwner && (CharacterOwner->Controller || bRunPhysicsWithNoController || (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)) )
+	{
+		Iterations++;
+		bJustTeleported = false;
+		const float timeTick = GetSimulationTimeStep(remainingTime, Iterations);
+		remainingTime -= timeTick;
+		const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+
+		FVector Start = UpdatedComponent->GetComponentLocation();
+		FVector CastDelta = UpdatedComponent->GetRightVector() * CapR() * 2;
+		FVector End = Safe_bWallRunIsRight ? Start + CastDelta : Start - CastDelta;
+		auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+		float SinPullAwayAngle = FMath::Sin(FMath::DegreesToRadians(WallRun_PullAwayAngle));
+		FHitResult WallHit;
+		GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+		bool bWantsToPullAway = WallHit.IsValidBlockingHit() && !Acceleration.IsNearlyZero() && (Acceleration.GetSafeNormal() | WallHit.Normal) > SinPullAwayAngle;
+
+		// Fall off wall
+		if (WallHit.IsValidBlockingHit() || bWantsToPullAway)
+		{
+			SetMovementMode(MOVE_Falling);
+			StartNewPhysics(remainingTime, Iterations);
+			return;
+		}
+
+		// Project acceleration onto the wall
+		Acceleration = FVector::VectorPlaneProject(Acceleration, WallHit.Normal);
+		Acceleration.Z = 0.0f;
+		// Apply acceleration
+		CalcVelocity(timeTick, 0.0f, false, GetMaxBrakingDeceleration());
+		// Project Velocity onto the wall
+		Velocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
+		// How much acceleration is tangent to the wall
+		// If our input is along the wall we get a value closer to 1 (-1 if we are against the direction along the wall)
+		float TangentAccel = Acceleration.GetSafeNormal() | Velocity.GetSafeNormal2D();
+		bool bVelUp = Velocity.Z > 0.0f;
+		// Apply gravity (they let go of input or go against the flow)
+		// Define the pattern using a curve of how gravity effects 
+		Velocity.Z += GetGravityZ() * WallRun_GravityScaleCurve->GetFloatValue(bVelUp ? 0.0f : TangentAccel) * timeTick;
+		// Losing too much velocity or too much downward velocity
+		if (Velocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2) || Velocity.Z < -WallRun_MaxVerticalSpeed)
+		{
+			SetMovementMode(MOVE_Falling);
+			StartNewPhysics(remainingTime, Iterations);
+			return;
+		}
+
+		// Commute move paramaters
+		const FVector Delta = timeTick * Velocity; // dx = v * dt
+		const bool bZeroDelta = Delta.IsNearlyZero();
+		if (bZeroDelta)
+		{
+			remainingTime = 0.0f;
+		}
+		else
+		{
+			FHitResult Hit;
+			// Move us by the delta of velocity
+			SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentQuat(), true, Hit);
+			// Move them at the wall
+			FVector WallAttractionDelta = -WallHit.Normal * WallRun_AttractionForce * timeTick;
+			SafeMoveUpdatedComponent(WallAttractionDelta, UpdatedComponent->GetComponentQuat(), true, Hit);
+		}
+		if (UpdatedComponent->GetComponentLocation() == OldLocation)
+		{
+			remainingTime = 0.0f;
+			break;
+		}
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick; // v = dx / dt
+	}
+
+	// Checks if we can still wallrun in the next frame
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector CastDelta = UpdatedComponent->GetRightVector() * CapR() * 2;
+	FVector End = Safe_bWallRunIsRight ? Start + CastDelta : Start - CastDelta;
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	FHitResult FloorHit, WallHit;
+	GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+	GetWorld()->LineTraceSingleByProfile(FloorHit, Start, Start + FVector::DownVector * (CapHH() + WallRun_MinHeight * 0.5f), "BlockAll", Params);
+	if (FloorHit.IsValidBlockingHit() || !WallHit.IsValidBlockingHit() || Velocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2))
+	{
+		SetMovementMode(MOVE_Falling);
+	}
+}
+
+#pragma endregion Wall Run
 
 #pragma region Replication
 

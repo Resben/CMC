@@ -18,6 +18,7 @@ enum ECustomMovementMode
 	CMOVE_None		UMETA(Hidden),
 	CMOVE_Slide		UMETA(DisplayName = "Slide"),
 	CMOVE_Prone		UMETA(DisplayName = "Prone"),
+	CMOVE_WallRun	UMETA(DisplayName = "Wall Run"),
 	CMOVE_Max		UMETA(Hidden),
 };
 
@@ -51,6 +52,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		uint8 Saved_bWantsToProne : 1;
 		uint8 Saved_bHadAnimRootMotion : 1;
 		uint8 Saved_bTransitionFinished : 1;
+		uint8 Saved_bWallRunIsRight : 1;
 		
 		FSavedMove_Adv();
 		
@@ -107,6 +109,15 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ShortMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionShortMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyShortMontage;
+
+	UPROPERTY(EditDefaultsOnly) float WallRun_MinSpeed = 200.f;
+	UPROPERTY(EditDefaultsOnly) float WallRun_MaxSpeed = 800.f;
+	UPROPERTY(EditDefaultsOnly) float WallRun_MaxVerticalSpeed = 200.f;
+	UPROPERTY(EditDefaultsOnly) float WallRun_PullAwayAngle = 75;
+	UPROPERTY(EditDefaultsOnly) float WallRun_AttractionForce = 200.f;
+	UPROPERTY(EditDefaultsOnly) float WallRun_MinHeight = 50.f;
+	UPROPERTY(EditDefaultsOnly) UCurveFloat* WallRun_GravityScaleCurve;
+	UPROPERTY(EditDefaultsOnly) float WallRun_JumpOffForce = 300.f;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
@@ -119,7 +130,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	// Non-Flags
 	bool Safe_bPrevWantsToCrouch;
 	bool Safe_bHadAnimRootMotion;
-
+	bool Safe_bWallRunIsRight;
+	
 	bool Safe_bTransitionFinished;
 	TSharedPtr<FRootMotionSource_MoveToForce> TransitionRMS;
 	UPROPERTY(Transient) UAnimMontage* TransitionQueuedMontage;
@@ -142,6 +154,8 @@ public:
 	virtual bool CanCrouchInCurrentState() const override;
 	virtual float GetMaxSpeed() const override;
 	virtual float GetMaxBrakingDeceleration() const override;
+	virtual bool CanAttemptJump() const override;
+	virtual bool DoJump(bool bReplayingMoves) override;
 	UAdvCharacterMovementComponent();
 
 private:
@@ -170,6 +184,10 @@ private:
 	bool TryMantle();
 	FVector GetMantleStartLocation(FHitResult FrontHit, FHitResult SurfaceHit, bool bTallMantle) const;
 
+	// Wall Run
+	bool TryWallRun();
+	void PhysWallRun(float deltaTime, int32 Iterations);
+	
 	// Helpers
 	bool IsServer() const;
 	float CapR() const;
@@ -195,11 +213,13 @@ public:
 	UFUNCTION(BlueprintCallable) void CrouchReleased();
 	UFUNCTION(BlueprintCallable) void DashPressed();
 	UFUNCTION(BlueprintCallable) void DashReleased();
-
 	
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
 
+	UFUNCTION(BlueprintPure) bool IsWallRunning() const { return IsCustomMovementMode(CMOVE_WallRun); }
+	UFUNCTION(BlueprintPure) bool WallRunningIsRight() const { return Safe_bWallRunIsRight; }
+	
 	// Can move replication to the base character to save bandwidth
 public:
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
