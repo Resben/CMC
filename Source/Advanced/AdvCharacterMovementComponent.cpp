@@ -6,6 +6,8 @@
 #include "Net/UnrealNetwork.h"
 #include "DrawDebugHelpers.h"
 
+#include "Engine/OverlapResult.h"
+
 // Helper Macros
 #if 1
 float MacroDuration = 2.f;
@@ -132,6 +134,10 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 		{
 			AdvancedCharacterOwner->StopJumping();
 		}
+		else if (TryHang())
+		{
+			AdvancedCharacterOwner->StopJumping();
+		}
 		else
 		{
 			AdvancedCharacterOwner->bPressedAdvancedJump = false;
@@ -144,17 +150,27 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		SLOG("Transition finished")
 		UE_LOG(LogTemp, Warning, TEXT("FINISHED RM"))
-		if (IsValid(TransitionQueuedMontage))
+		if (TransitionName == "Mantle")
 		{
-			SetMovementMode(MOVE_Flying);
-			CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
-			TransitionQueuedMontageSpeed = 0.0f;
-			TransitionQueuedMontage = nullptr;
+			if (IsValid(TransitionQueuedMontage))
+			{
+				SetMovementMode(MOVE_Flying);
+				CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
+				TransitionQueuedMontageSpeed = 0.0f;
+				TransitionQueuedMontage = nullptr;
+			}
+			else
+			{
+				SetMovementMode(MOVE_Walking);
+			}	
 		}
-		else
+		else if (TransitionName == "Hang")
 		{
-			SetMovementMode(MOVE_Walking);
+			SetMovementMode(MOVE_Custom, CMOVE_Hang);
+			Velocity = FVector::ZeroVector;
 		}
+
+		TransitionName = "";
 		Safe_bTransitionFinished = false;
 	}
 
@@ -204,6 +220,10 @@ void UAdvCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteration
 	case CMOVE_WallRun:
 		PhysWallRun(deltaTime, Iterations);
 		break;
+	case CMOVE_Hang:
+		break;
+	case CMOVE_Climb:
+		PhysClimb(deltaTime, Iterations);
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 	}
@@ -257,6 +277,10 @@ float UAdvCharacterMovementComponent::GetMaxSpeed() const
 		return Prone_MaxSpeed;
 	case CMOVE_WallRun:
 		return WallRun_MaxSpeed;
+	case CMOVE_Hang:
+		return 0.0f;
+	case CMOVE_Climb:
+		return Climb_MaxSpeed;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 		return -1.0f;
@@ -270,11 +294,15 @@ float UAdvCharacterMovementComponent::GetMaxBrakingDeceleration() const
 	switch (CustomMovementMode)
 	{
 	case CMOVE_Slide:
-		return Slide_MaxBreakingDeceleration;
+		return Slide_MaxBrakingDeceleration;
 	case CMOVE_Prone:
-		return Prone_MaxBreakingDeceleration;
+		return Prone_MaxBrakingDeceleration;
 	case CMOVE_WallRun:
 		return 0.0f;
+	case CMOVE_Hang:
+		return 0.0f;
+	case CMOVE_Climb:
+		return Climb_BrakingDeceleration;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 		return -1.0f;
@@ -283,13 +311,14 @@ float UAdvCharacterMovementComponent::GetMaxBrakingDeceleration() const
 
 bool UAdvCharacterMovementComponent::CanAttemptJump() const
 {
-	return Super::CanAttemptJump() || IsWallRunning();
+	return Super::CanAttemptJump() || IsWallRunning() || IsClimbing() || IsHanging();
 }
 
 bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
 {
 	// DoJump calls SetMovementMode(MOVE_Falling) so store it here
 	bool bWasWallRunning = IsWallRunning();
+	bool bWasOnWall = IsHanging() || IsClimbing();
 	if (Super::DoJump(bReplayingMoves))
 	{
 		if (bWasWallRunning)
@@ -304,10 +333,18 @@ bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
 			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
 			Velocity += WallHit.Normal * WallRun_JumpOffForce;
 		}
-
+		else if (bWasOnWall)
+		{
+			// Only play the montage if there was no de-sync
+			if (!bReplayingMoves)
+			{
+				CharacterOwner->PlayAnimMontage(Hang_WallJumpMontage);
+			}
+			Velocity += FVector::UpVector * Hang_WallJumpForce * 0.5f;
+			Velocity += Acceleration.GetSafeNormal2D() * Hang_WallJumpForce * 0.5f;
+		}
 		return true;
 	}
-	
 	return false;
 }
 
@@ -1141,7 +1178,8 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
 	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
 	TransitionRMS->TargetLocation = TransitionTarget;
-
+	TransitionName = "Mantle";
+	
 	// Zero out the Velocity
 	Velocity = FVector::ZeroVector;
 	// Remove gravity application
@@ -1206,7 +1244,7 @@ bool UAdvCharacterMovementComponent::TryWallRun()
 	// Set line hits for left and right
 	FVector Start = UpdatedComponent->GetComponentLocation();
 	FVector LeftEnd = Start - UpdatedComponent->GetRightVector() * CapR() * 2;
-	FVector RightEnd = Start + UpdatedComponent->GetRightVector() * CapHH() * 2;
+	FVector RightEnd = Start + UpdatedComponent->GetRightVector() * CapR() * 2;
 	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
 	FHitResult FloorHit, WallHit;
 
@@ -1282,7 +1320,7 @@ void UAdvCharacterMovementComponent::PhysWallRun(float deltaTime, int32 Iteratio
 		bool bWantsToPullAway = WallHit.IsValidBlockingHit() && !Acceleration.IsNearlyZero() && (Acceleration.GetSafeNormal() | WallHit.Normal) > SinPullAwayAngle;
 
 		// Fall off wall
-		if (WallHit.IsValidBlockingHit() || bWantsToPullAway)
+		if (!WallHit.IsValidBlockingHit() || bWantsToPullAway)
 		{
 			SetMovementMode(MOVE_Falling);
 			StartNewPhysics(remainingTime, Iterations);
@@ -1350,6 +1388,102 @@ void UAdvCharacterMovementComponent::PhysWallRun(float deltaTime, int32 Iteratio
 }
 
 #pragma endregion Wall Run
+
+#pragma region Climbing
+
+bool UAdvCharacterMovementComponent::TryHang()
+{
+	if (!IsMovementMode(MOVE_Falling)) return false;
+
+	SLOG("Wants to climb")
+
+	FHitResult WallHit;
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector End = Start + UpdatedComponent->GetForwardVector() * 300.0f; // Not needed to be parameterised -> restricted later
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	if (!GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params)) return false;
+
+	TArray<FOverlapResult> OverlapResults;
+
+	// Move detection to the players head then move 2 capsules in front
+	// Can parameterise the box size to give more accessibility to what can be grabbed
+	FVector ColLoc = UpdatedComponent->GetComponentLocation() + FVector::UpVector * CapHH() + UpdatedComponent->GetForwardVector() * CapR() * 3;
+	auto ColBox = FCollisionShape::MakeBox(FVector(100, 100, 50));
+	// Makes the box lined up with the wall and the Up vector
+	FQuat ColRot = FRotationMatrix::MakeFromXZ(WallHit.Normal, FVector::UpVector).ToQuat();
+
+	if (!GetWorld()->OverlapMultiByChannel(OverlapResults, ColLoc, ColRot, ECC_WorldStatic, ColBox, Params)) return false;
+
+	AActor* ClimbPoint = nullptr;
+
+	float MaxHeight = -1e20;
+	for (FOverlapResult Result : OverlapResults)
+	{
+		if (Result.GetActor()->ActorHasTag("Climb Point"))
+		{
+			float Height = Result.GetActor()->GetActorLocation().Z;
+			if (Height > MaxHeight)
+			{
+				MaxHeight = Height;
+				ClimbPoint = Result.GetActor();
+			}
+		}
+	}
+	if (!IsValid(ClimbPoint)) return false;
+
+	// Where the capsule should be
+	// Back away from the wall -> 1.01 for a bit of tolerance from the wall
+	FVector TargetLocation = ClimbPoint->GetActorLocation() + WallHit.Normal * CapR() * 1.01f + FVector::DownVector * CapHH();
+	FQuat TargetRotation = FRotationMatrix::MakeFromXZ(-WallHit.Normal, FVector::UpVector).ToQuat();
+
+	// Test if the character can reach this goal -> Including the movement to said goal not just if they fit in the target
+	FTransform CurrentTransform = UpdatedComponent->GetComponentTransform();
+	FHitResult Hit, ReturnHit;
+	// Sweep to true so it actually simulates this movement and checks if there was any collision
+	SafeMoveUpdatedComponent(TargetLocation - UpdatedComponent->GetComponentLocation(), UpdatedComponent->GetComponentQuat(), true, Hit);
+	FVector ResultLocation = UpdatedComponent->GetComponentLocation();
+	// Move them back
+	SafeMoveUpdatedComponent(CurrentTransform.GetLocation() - ResultLocation, TargetRotation, false, ReturnHit);
+	if (!ResultLocation.Equals(TargetLocation)) return false;
+
+	// Passed all conditions
+
+	bOrientRotationToMovement = false;
+
+	float UpSpeed = Velocity | FVector::UpVector;
+	float TransDistance = FVector::Dist(TargetLocation, UpdatedComponent->GetComponentLocation());
+
+	TransitionQueuedMontageSpeed = FMath::GetMappedRangeValueClamped(FVector2D(-500, 750), FVector2D(0.9f, 1.2f), UpSpeed);
+	TransitionRMS.Reset();
+	TransitionRMS = MakeShared<FRootMotionSource_MoveToForce>();
+	TransitionRMS->AccumulateMode = ERootMotionAccumulateMode::Override;
+
+	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, 0.1f, 0.25f);
+	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
+	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
+	TransitionRMS->TargetLocation = UpdatedComponent->GetComponentLocation();
+
+	Velocity = FVector::ZeroVector;
+	SetMovementMode(MOVE_Flying);
+	TransitionRMS_ID = ApplyRootMotionSource(TransitionRMS);
+
+	TransitionQueuedMontage = nullptr;
+	TransitionName = "Hang";
+	CharacterOwner->PlayAnimMontage(Hang_TransitionMontage, 1 / TransitionRMS->Duration);
+
+	return true;
+}
+
+bool UAdvCharacterMovementComponent::TryClimb()
+{
+	return true;
+}
+
+void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
+{
+}
+
+#pragma endregion Climbing
 
 #pragma region Replication
 

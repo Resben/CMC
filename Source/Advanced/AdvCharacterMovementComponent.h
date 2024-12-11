@@ -19,6 +19,8 @@ enum ECustomMovementMode
 	CMOVE_Slide		UMETA(DisplayName = "Slide"),
 	CMOVE_Prone		UMETA(DisplayName = "Prone"),
 	CMOVE_WallRun	UMETA(DisplayName = "Wall Run"),
+	CMOVE_Hang	UMETA(DisplayName = "Hang"),
+	CMOVE_Climb 	UMETA(DisplayName = "Climb"),
 	CMOVE_Max		UMETA(Hidden),
 };
 
@@ -83,12 +85,12 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 400.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 4000.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_FrictionFactor = 0.06f;
-	UPROPERTY(EditDefaultsOnly) float Slide_MaxBreakingDeceleration = 1000.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MaxBrakingDeceleration = 1000.0f;
 
 	UPROPERTY(EditDefaultsOnly) float Prone_EnterHoldDuration = 0.2f;
 	UPROPERTY(EditDefaultsOnly) float Prone_SlideEnterImpulse = 300.0f;
 	UPROPERTY(EditDefaultsOnly) float Prone_MaxSpeed = 300.0f;
-	UPROPERTY(EditDefaultsOnly) float Prone_MaxBreakingDeceleration = 2500.0f;
+	UPROPERTY(EditDefaultsOnly) float Prone_MaxBrakingDeceleration = 2500.0f;
 
 	UPROPERTY(EditDefaultsOnly) float Dash_Impulse = 1000.0f;
 	UPROPERTY(EditDefaultsOnly) float Dash_CooldownDuration = 1.0f;
@@ -118,6 +120,14 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float WallRun_MinHeight = 50.f;
 	UPROPERTY(EditDefaultsOnly) UCurveFloat* WallRun_GravityScaleCurve;
 	UPROPERTY(EditDefaultsOnly) float WallRun_JumpOffForce = 300.f;
+
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_TransitionMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_WallJumpMontage;
+	UPROPERTY(EditDefaultsOnly) float Hang_WallJumpForce = 400.f;
+
+	UPROPERTY(EditDefaultsOnly) float Climb_MaxSpeed = 300.f;
+	UPROPERTY(EditDefaultsOnly) float Climb_BrakingDeceleration = 1000.f;
+	UPROPERTY(EditDefaultsOnly) float Climb_ReachDistance = 200.f;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
@@ -134,6 +144,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	
 	bool Safe_bTransitionFinished;
 	TSharedPtr<FRootMotionSource_MoveToForce> TransitionRMS;
+	FString TransitionName;
 	UPROPERTY(Transient) UAnimMontage* TransitionQueuedMontage;
 	float TransitionQueuedMontageSpeed;
 	int TransitionRMS_ID;
@@ -187,6 +198,13 @@ private:
 	// Wall Run
 	bool TryWallRun();
 	void PhysWallRun(float deltaTime, int32 Iterations);
+
+	// Hang
+	bool TryHang();
+
+	// Climb
+	bool TryClimb();
+	void PhysClimb(float deltaTime, int32 Iterations);
 	
 	// Helpers
 	bool IsServer() const;
@@ -219,6 +237,9 @@ public:
 
 	UFUNCTION(BlueprintPure) bool IsWallRunning() const { return IsCustomMovementMode(CMOVE_WallRun); }
 	UFUNCTION(BlueprintPure) bool WallRunningIsRight() const { return Safe_bWallRunIsRight; }
+
+	UFUNCTION(BlueprintPure) bool IsHanging() const { return IsCustomMovementMode(CMOVE_Hang); }
+	UFUNCTION(BlueprintPure) bool IsClimbing() const { return IsCustomMovementMode(CMOVE_Climb); }
 	
 	// Can move replication to the base character to save bandwidth
 public:
