@@ -90,6 +90,15 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		SetMovementMode(MOVE_Walking);
 	}
+	else if (IsFalling() && bWantsToCrouch)
+	{
+		if (TryClimb()) bWantsToCrouch = false;
+	}
+	else if ((IsClimbing() || IsHanging()) && bWantsToCrouch)
+	{
+		SetMovementMode(MOVE_Falling);
+		bWantsToCrouch = false;
+	}
 
 	// -- PRONE -- //
 
@@ -143,9 +152,11 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 			AdvancedCharacterOwner->bPressedAdvancedJump = false;
 			CharacterOwner->bPressedJump = true;
 			CharacterOwner->CheckJumpInput(DeltaSeconds);
+			bOrientRotationToMovement = true;
 		}
 	}
 
+	// Transition
 	if (Safe_bTransitionFinished)
 	{
 		SLOG("Transition finished")
@@ -224,6 +235,7 @@ void UAdvCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteration
 		break;
 	case CMOVE_Climb:
 		PhysClimb(deltaTime, Iterations);
+		break;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 	}
@@ -239,12 +251,17 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 	if (IsCustomMovementMode(CMOVE_Prone)) EnterProne(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
+	if (IsFalling())
+	{
+		bOrientRotationToMovement = true;
+	}
+	
 	// Simulated proxies will get OnMovementModeChanged triggered because custom movement mode is a replicated variable
 	// So instead do your own calculations to avoid using unnecessary bandwidth
 	if (IsWallRunning() && GetOwnerRole() == ROLE_SimulatedProxy)
 	{
 		FVector Start = UpdatedComponent->GetComponentLocation();
-		FVector End = UpdatedComponent->GetComponentLocation();
+		FVector End = Start + UpdatedComponent->GetRightVector() * CapR() * 2;
 		auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
 		FHitResult WallHit;
 		Safe_bWallRunIsRight = GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
@@ -268,7 +285,7 @@ float UAdvCharacterMovementComponent::GetMaxSpeed() const
 	if (IsMovementMode(MOVE_Walking) && Safe_bWantsToSprint && !IsCrouching()) return Sprint_MaxSpeed;
 
 	if (MovementMode != MOVE_Custom) return Super::GetMaxSpeed();
-
+	
 	switch (CustomMovementMode)
 	{
 	case CMOVE_Slide:
@@ -504,6 +521,16 @@ void UAdvCharacterMovementComponent::DashReleased()
 	// Timer is used if we are holding the press and want to dash ASAP
 	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_DashCooldown);
 	Safe_bWantsToDash = false;
+}
+
+void UAdvCharacterMovementComponent::ClimbPressed()
+{
+	if (IsFalling() || IsClimbing() || IsHanging()) bWantsToCrouch = true;
+}
+
+void UAdvCharacterMovementComponent::ClimbReleased()
+{
+	bWantsToCrouch = false;
 }
 
 bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
@@ -1461,7 +1488,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, 0.1f, 0.25f);
 	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
 	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
-	TransitionRMS->TargetLocation = UpdatedComponent->GetComponentLocation();
+	TransitionRMS->TargetLocation = TargetLocation;
 
 	Velocity = FVector::ZeroVector;
 	SetMovementMode(MOVE_Flying);
@@ -1476,11 +1503,73 @@ bool UAdvCharacterMovementComponent::TryHang()
 
 bool UAdvCharacterMovementComponent::TryClimb()
 {
+	if (!IsFalling()) return false;
+
+	FHitResult SurfaceHit;
+	FHitResult ClimbResult;
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector End = Start + UpdatedComponent->GetForwardVector() * Climb_ReachDistance;
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	GetWorld()->LineTraceSingleByProfile(SurfaceHit, Start, End, "BlockAll", Params);
+
+	if (!SurfaceHit.IsValidBlockingHit()) return false;
+
+	FQuat NewRotation = FRotationMatrix::MakeFromXZ(-SurfaceHit.Normal, FVector::UpVector).ToQuat();
+	SafeMoveUpdatedComponent(FVector::ZeroVector, NewRotation, false, ClimbResult);
+
+	SetMovementMode(MOVE_Custom, CMOVE_Climb);
+
+	bOrientRotationToMovement = false;
+
 	return true;
 }
 
 void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations)
 {
+	if (deltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+
+	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
+	{
+		Acceleration = FVector::ZeroVector;
+		Velocity = FVector::ZeroVector;
+		return;
+	}
+
+	bJustTeleported = false;
+	Iterations++;
+	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+	FHitResult SurfaceHit, FloorHit;
+	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
+	GetWorld()->LineTraceSingleByProfile(SurfaceHit, OldLocation, OldLocation + UpdatedComponent->GetForwardVector() * Climb_ReachDistance, "BlockAll", Params);
+	GetWorld()->LineTraceSingleByProfile(FloorHit, OldLocation, OldLocation + FVector::DownVector * CapHH() * 1.2f, "BlockAll", Params);
+
+	if (!SurfaceHit.IsValidBlockingHit() || FloorHit.IsValidBlockingHit())
+	{
+		SetMovementMode(MOVE_Falling);
+		StartNewPhysics(deltaTime, Iterations);
+		return;
+	}
+
+	// Rotate your inputs so forward key (w) is now the up vector
+	Acceleration.Z = 0.0f;
+	Acceleration = Acceleration.RotateAngleAxis(90.0f, -UpdatedComponent->GetRightVector());
+
+	CalcVelocity(deltaTime, 0.0f, false, GetMaxBrakingDeceleration());
+	Velocity = FVector::VectorPlaneProject(Velocity, SurfaceHit.Normal);
+
+	const FVector Delta = deltaTime * Velocity; // dx = v * dt
+	if (!Delta.IsNearlyZero())
+	{
+		FHitResult Hit;
+		SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentQuat(), true, Hit);
+		FVector WallAttractionDelta = -SurfaceHit.Normal * WallRun_AttractionForce * deltaTime;
+		SafeMoveUpdatedComponent(WallAttractionDelta , UpdatedComponent->GetComponentQuat(), true, Hit);
+	}
+
+	Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / deltaTime; // v = dx / dt
 }
 
 #pragma endregion Climbing
