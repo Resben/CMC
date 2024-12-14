@@ -11,6 +11,7 @@
 // @todo look into delegates
 // An event that you can create and broadcast (A signal?)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDashStartDelegate);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnStateChanged);
 
 UENUM(BlueprintType)
 enum ECustomMovementMode
@@ -76,7 +77,6 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
 
-	UPROPERTY(EditDefaultsOnly) bool Setting_ShouldUsePhysicsDash = false;
 	UPROPERTY(EditDefaultsOnly) bool Setting_GravityEnabledDash = true;
 	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 750.0f;
 	
@@ -105,6 +105,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Mantle_MinWallSteepnessAngle = 75;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxSurfaceAngle = 40;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxAlignmentAngle = 45;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinTransitionTime = 0.1;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxTransitionTime = 0.25;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyTallMontage;
@@ -121,6 +123,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) UCurveFloat* WallRun_GravityScaleCurve;
 	UPROPERTY(EditDefaultsOnly) float WallRun_JumpOffForce = 300.f;
 
+	UPROPERTY(EditDefaultsOnly) float Hang_MinTransitionTime = 0.1;
+	UPROPERTY(EditDefaultsOnly) float Hang_MaxTransitionTime = 0.25;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_TransitionMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_WallJumpMontage;
 	UPROPERTY(EditDefaultsOnly) float Hang_WallJumpForce = 400.f;
@@ -188,8 +192,7 @@ private:
 	// Dash
 	void OnDashCooldownFinished();
 	bool CanDash() const;
-	void PerformPhysicsDash();
-	void PerformMontageDash();
+	void PerformDash();
 
 	// Mantle
 	bool TryMantle();
@@ -224,6 +227,8 @@ protected:
 	/// Custom blueprint export functions
 public:
 	UPROPERTY(BlueprintAssignable) FDashStartDelegate DashStartDelegate;
+
+	UPROPERTY(BlueprintAssignable, Category="Movement") FOnStateChanged OnStateChangedDelegate; 
 	
 	UFUNCTION(BlueprintCallable) void SprintPressed();
 	UFUNCTION(BlueprintCallable) void SprintReleased();

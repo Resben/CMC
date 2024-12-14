@@ -124,9 +124,7 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		if (!bAuthProxy || GetWorld()->GetTimeSeconds() - DashStartTime > Dash_AuthCooldownDuration)
 		{
-			if (Setting_ShouldUsePhysicsDash) PerformPhysicsDash();
-			else PerformMontageDash();
-			
+			PerformDash();
 			Safe_bWantsToDash = false;
 			Proxy_bDashStart = !Proxy_bDashStart;
 		}
@@ -251,6 +249,8 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 	if (IsCustomMovementMode(CMOVE_Prone)) EnterProne(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
+	if (IsCustomMovementMode(CMOVE_Hang)) SLOG("Switched to hang")
+	
 	if (IsFalling())
 	{
 		bOrientRotationToMovement = true;
@@ -266,6 +266,8 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 		FHitResult WallHit;
 		Safe_bWallRunIsRight = GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
 	}
+
+	OnStateChangedDelegate.Broadcast();
 }
 
 bool UAdvCharacterMovementComponent::IsMovingOnGround() const
@@ -1027,31 +1029,8 @@ bool UAdvCharacterMovementComponent::CanDash() const
 	return IsWalking() && !IsCrouching() || IsFalling();
 }
 
-// Similar to launch here we can customise it
-// Launch is Velocity +=
-// Launch can be called in movement unsafe
-// Launch calls next frame
-void UAdvCharacterMovementComponent::PerformPhysicsDash()
-{
-	DashStartTime = GetWorld()->GetTimeSeconds();
 
-	// If your stationary use the facing direction else use the direction you are moving
-	// Acceleration is the same as the input vector on the client -> no need for server rpc
-	FVector DashDirection = (Acceleration.IsNearlyZero() ? UpdatedComponent->GetForwardVector() : Acceleration).GetSafeNormal2D();
-	// Uses the fixed value use += for a combination of dash and movement
-	Velocity = Dash_Impulse * (DashDirection + FVector::UpVector * 0.1f);
-
-	// Face in dash direction 
-	FQuat NewRotation = FRotationMatrix::MakeFromXZ(DashDirection, FVector::UpVector).ToQuat();
-	FHitResult Hit;
-	SafeMoveUpdatedComponent(FVector::ZeroVector, NewRotation, false, Hit);
-
-	SetMovementMode(MOVE_Falling);
-
-	DashStartDelegate.Broadcast();
-}
-
-void UAdvCharacterMovementComponent::PerformMontageDash()
+void UAdvCharacterMovementComponent::PerformDash()
 {
 	DashStartTime = GetWorld()->GetTimeSeconds();
 	
@@ -1201,7 +1180,7 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	TransitionRMS->AccumulateMode = ERootMotionAccumulateMode::Override;
 
 	// Duration of the transition based on how far you are away from the target distance
-	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, 0.1f, 0.25f);
+	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, Mantle_MinTransitionTime, Mantle_MaxTransitionTime);
 	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
 	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
 	TransitionRMS->TargetLocation = TransitionTarget;
@@ -1485,7 +1464,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 	TransitionRMS = MakeShared<FRootMotionSource_MoveToForce>();
 	TransitionRMS->AccumulateMode = ERootMotionAccumulateMode::Override;
 
-	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, 0.1f, 0.25f);
+	TransitionRMS->Duration = FMath::Clamp(TransDistance / 500.0f, Hang_MinTransitionTime, Hang_MaxTransitionTime);
 	SLOG(FString::Printf(TEXT("Duration: %f"), TransitionRMS->Duration))
 	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
 	TransitionRMS->TargetLocation = TargetLocation;
