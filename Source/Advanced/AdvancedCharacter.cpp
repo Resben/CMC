@@ -75,10 +75,14 @@ FCollisionQueryParams AAdvancedCharacter::GetIgnoreCharacterParams() const
 
 void AAdvancedCharacter::Jump()
 {
+	if (AdvancedMovementComponent->IsSliding())
+	{
+		AdvancedMovementComponent->ExitSlideMode();
+	}
+
 	Super::Jump();
-
+	
 	bPressedAdvancedJump = true;
-
 	bPressedJump = false;
 }
 

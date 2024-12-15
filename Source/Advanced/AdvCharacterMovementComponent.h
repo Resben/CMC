@@ -173,14 +173,17 @@ public:
 	virtual bool DoJump(bool bReplayingMoves) override;
 	UAdvCharacterMovementComponent();
 
-private:
 	// Slide
+private:
 	void EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode);
 	void ExitSlide();
 	void PhysSlide(float deltaTime, int32 Iterations);
 	bool CanSlide() const;
+public:
+	void ExitSlideMode();
 
 	// Prone
+private:
 	void TryEnterProne() { Safe_bWantsToProne = true; }
 	UFUNCTION(Server, Reliable) void Server_EnterProne();
 	
@@ -242,6 +245,8 @@ public:
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
 
+	UFUNCTION(BlueprintPure) bool IsSliding() const { return IsCustomMovementMode(CMOVE_Slide); }
+	
 	UFUNCTION(BlueprintPure) bool IsWallRunning() const { return IsCustomMovementMode(CMOVE_WallRun); }
 	UFUNCTION(BlueprintPure) bool WallRunningIsRight() const { return Safe_bWallRunIsRight; }
 

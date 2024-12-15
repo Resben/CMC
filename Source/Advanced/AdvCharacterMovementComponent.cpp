@@ -330,7 +330,7 @@ float UAdvCharacterMovementComponent::GetMaxBrakingDeceleration() const
 
 bool UAdvCharacterMovementComponent::CanAttemptJump() const
 {
-	return Super::CanAttemptJump() || IsWallRunning() || IsClimbing() || IsHanging();
+	return Super::CanAttemptJump() || IsWallRunning() || IsClimbing() || IsHanging() || IsSliding();
 }
 
 bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
@@ -338,6 +338,7 @@ bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
 	// DoJump calls SetMovementMode(MOVE_Falling) so store it here
 	bool bWasWallRunning = IsWallRunning();
 	bool bWasOnWall = IsHanging() || IsClimbing();
+	
 	if (Super::DoJump(bReplayingMoves))
 	{
 		if (bWasWallRunning)
@@ -362,6 +363,7 @@ bool UAdvCharacterMovementComponent::DoJump(bool bReplayingMoves)
 			Velocity += FVector::UpVector * Hang_WallJumpForce * 0.5f;
 			Velocity += Acceleration.GetSafeNormal2D() * Hang_WallJumpForce * 0.5f;
 		}
+		
 		return true;
 	}
 	return false;
@@ -582,6 +584,12 @@ void UAdvCharacterMovementComponent::ExitSlide()
 {
 	bWantsToCrouch = false;
 	bOrientRotationToMovement = true;
+}
+
+void UAdvCharacterMovementComponent::ExitSlideMode()
+{
+	UnCrouch();
+	SetMovementMode(MOVE_Walking);
 }
 
 bool UAdvCharacterMovementComponent::CanSlide() const
