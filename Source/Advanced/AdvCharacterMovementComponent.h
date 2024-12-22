@@ -18,7 +18,6 @@ enum ECustomMovementMode
 {
 	CMOVE_None		UMETA(Hidden),
 	CMOVE_Slide		UMETA(DisplayName = "Slide"),
-	CMOVE_Prone		UMETA(DisplayName = "Prone"),
 	CMOVE_WallRun	UMETA(DisplayName = "Wall Run"),
 	CMOVE_Hang	UMETA(DisplayName = "Hang"),
 	CMOVE_Climb 	UMETA(DisplayName = "Climb"),
@@ -87,12 +86,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 4000.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_FrictionFactor = 0.06f;
 	UPROPERTY(EditDefaultsOnly) float Slide_MaxBrakingDeceleration = 1000.0f;
-
-	UPROPERTY(EditDefaultsOnly) float Prone_EnterHoldDuration = 0.2f;
-	UPROPERTY(EditDefaultsOnly) float Prone_SlideEnterImpulse = 300.0f;
-	UPROPERTY(EditDefaultsOnly) float Prone_MaxSpeed = 300.0f;
-	UPROPERTY(EditDefaultsOnly) float Prone_MaxBrakingDeceleration = 2500.0f;
-
+	
 	UPROPERTY(EditDefaultsOnly) float Dash_Impulse = 1000.0f;
 	UPROPERTY(EditDefaultsOnly) float Dash_CooldownDuration = 1.0f;
 	// Prevents cheating by making sure cooldown is not half for example it's dash time allowing for a margin of
@@ -158,7 +152,6 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	int TransitionRMS_ID;
 	
 	float DashStartTime;
-	FTimerHandle TimerHandle_EnterProne;
 	FTimerHandle TimerHandle_DashCooldown;
 	
 	// Replication
@@ -186,17 +179,8 @@ private:
 public:
 	void ExitSlideMode();
 
-	// Prone
-private:
-	void TryEnterProne() { Safe_bWantsToProne = true; }
-	UFUNCTION(Server, Reliable) void Server_EnterProne();
-	
-	void EnterProne(EMovementMode PrevMode, ECustomMovementMode PrevMovementMode);
-	void ExitProne();
-	bool CanProne() const;
-	void PhysProne(float deltaTime, int32 Iterations);
-
 	// Dash
+private:
 	void OnDashCooldownFinished();
 	bool CanDash() const;
 	void PerformDash();

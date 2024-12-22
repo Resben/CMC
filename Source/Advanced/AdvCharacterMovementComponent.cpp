@@ -100,23 +100,6 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 		bWantsToCrouch = false;
 	}
 
-	// -- PRONE -- //
-
-	if (Safe_bWantsToProne)
-	{
-		if (CanProne())
-		{
-			SetMovementMode(MOVE_Custom, CMOVE_Prone);
-			if (!CharacterOwner->HasAuthority()) Server_EnterProne(); // Not the server call EnterProne
-		}
-		Safe_bWantsToProne = false;
-	}
-	
-	if (IsCustomMovementMode(CMOVE_Prone) && !bWantsToCrouch)
-	{
-		SetMovementMode(MOVE_Walking);
-	}
-
 	// -- DASH -- //
 	// On the server but not the servers controlled character
 	bool bAuthProxy = CharacterOwner->HasAuthority() && !CharacterOwner->IsLocallyControlled();
@@ -223,9 +206,6 @@ void UAdvCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteration
 	case CMOVE_Slide:
 		PhysSlide(deltaTime, Iterations);
 		break;
-	case CMOVE_Prone:
-		PhysProne(deltaTime, Iterations);
-		break;
 	case CMOVE_WallRun:
 		PhysWallRun(deltaTime, Iterations);
 		break;
@@ -243,10 +223,8 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
 
-	if (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Prone) ExitProne();
 	if (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Slide) ExitSlide();
 	
-	if (IsCustomMovementMode(CMOVE_Prone)) EnterProne(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
 	if (IsCustomMovementMode(CMOVE_Hang)) SLOG("Switched to hang")
@@ -274,7 +252,7 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 
 bool UAdvCharacterMovementComponent::IsMovingOnGround() const
 {
-	return Super::IsMovingOnGround() || IsCustomMovementMode(CMOVE_Slide) || IsCustomMovementMode(CMOVE_Prone);
+	return Super::IsMovingOnGround() || IsCustomMovementMode(CMOVE_Slide);
 }
 
 bool UAdvCharacterMovementComponent::CanCrouchInCurrentState() const
@@ -293,9 +271,7 @@ float UAdvCharacterMovementComponent::GetMaxSpeed() const
 	switch (CustomMovementMode)
 	{
 	case CMOVE_Slide:
-		return Slide_MaxSpeed; 
-	case CMOVE_Prone:
-		return Prone_MaxSpeed;
+		return Slide_MaxSpeed;
 	case CMOVE_WallRun:
 		return WallRun_MaxSpeed;
 	case CMOVE_Hang:
@@ -316,8 +292,6 @@ float UAdvCharacterMovementComponent::GetMaxBrakingDeceleration() const
 	{
 	case CMOVE_Slide:
 		return Slide_MaxBrakingDeceleration;
-	case CMOVE_Prone:
-		return Prone_MaxBrakingDeceleration;
 	case CMOVE_WallRun:
 		return 0.0f;
 	case CMOVE_Hang:
@@ -507,12 +481,10 @@ void UAdvCharacterMovementComponent::SprintReleased()
 void UAdvCharacterMovementComponent::CrouchPressed()
 {
 	bWantsToCrouch = !bWantsToCrouch;
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle_EnterProne, this, &UAdvCharacterMovementComponent::TryEnterProne, Prone_EnterHoldDuration);
 }
 
 void UAdvCharacterMovementComponent::CrouchReleased()
 {
-	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_EnterProne);
 }
 
 void UAdvCharacterMovementComponent::DashPressed()
@@ -808,225 +780,6 @@ void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations
 }
 
 #pragma endregion Slide
-
-#pragma region Prone
-
-void UAdvCharacterMovementComponent::Server_EnterProne_Implementation()
-{
-	Safe_bWantsToProne = true;
-}
-
-void UAdvCharacterMovementComponent::EnterProne(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode)
-{
-	bWantsToCrouch = true;
-
-	// Not necessary dive boost
-	if (PrevMode == MOVE_Custom && PrevCustomMode == CMOVE_Slide)
-	{
-		Velocity += Velocity.GetSafeNormal2D() * Prone_SlideEnterImpulse;
-	}
-
-	// Ensures the very first substep has a valid updated floor
-	FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, true, nullptr);
-}
-
-void UAdvCharacterMovementComponent::ExitProne() {}
-
-bool UAdvCharacterMovementComponent::CanProne() const
-{
-	return IsCustomMovementMode(CMOVE_Slide) || IsMovementMode(MOVE_Walking) && IsCrouching();
-}
-
-void UAdvCharacterMovementComponent::PhysProne(float deltaTime, int32 Iterations)
-{
-	if (deltaTime < MIN_TICK_TIME)
-	{
-		return;
-	}
-
-	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
-	{
-		Acceleration = FVector::ZeroVector;
-		Velocity = FVector::ZeroVector;
-		return;
-	}
-
-	bJustTeleported = false;
-	bool bCheckedFall = false;
-	bool bTriedLedgeMove = false;
-	float remainingTime = deltaTime;
-
-	while ((remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations) && CharacterOwner && (CharacterOwner->Controller || bRunPhysicsWithNoController || (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)))
-	{
-		// Using simulated time step for more accurate results
-		// Multiple calculations of movement over a single frame
-		Iterations++;
-		bJustTeleported = false;
-		const float timeTick = GetSimulationTimeStep(remainingTime, Iterations);
-		remainingTime -= timeTick;
-
-		// Get old values -> May need to revert if we go over a ledge
-		UPrimitiveComponent * const OldBase = GetMovementBase();
-		const FVector PreviousBaseLocation = (OldBase != nullptr) ? OldBase->GetComponentLocation() : FVector::ZeroVector;
-		const FVector OldLocation = UpdatedComponent->GetComponentLocation();
-		const FFindFloorResult OldFloor = CurrentFloor;
-
-		// Ensure velocity is horizontal
-		MaintainHorizontalGroundVelocity();
-		const FVector OldVelocity = Velocity;
-		Acceleration.Z = 0.0f;
-
-		// Apply Acceleration
-		// Breaking deceleration friction that applies when you let go of the controls -> breaking
-		CalcVelocity(timeTick, GroundFriction, false, GetMaxBrakingDeceleration());
-
-		// Compute the move parameters
-		const FVector MoveVelocity = Velocity;
-		const FVector Delta = timeTick * MoveVelocity; // dx = v * dt
-		const bool bZeroDelta = Delta.IsNearlyZero();
-		FStepDownResult StepDownResult;
-
-		// If the velocity is zero no need for a full simulation
-		if (bZeroDelta)
-		{
-			remainingTime = 0.0f;
-		}
-		else
-		{
-			MoveAlongFloor(MoveVelocity, timeTick, &StepDownResult);
-
-			// Clean up the move
-			if (IsFalling())
-			{
-				const float DesiredDist = Delta.Size();
-				if (DesiredDist > KINDA_SMALL_NUMBER)
-				{
-					const float ActualDist = (UpdatedComponent->GetComponentLocation() - OldLocation).Size2D();
-					remainingTime += timeTick * (1.0f - FMath::Min(1.0f, ActualDist / DesiredDist));
-				}
-				// Switch movement modes mid-simulation
-				StartNewPhysics(remainingTime, Iterations);
-				return;
-			}
-			else if (IsSwimming())
-			{
-				StartSwimming(OldLocation, OldVelocity, timeTick, remainingTime, Iterations);
-				return;
-			}
-			// Add more edge cases as you see fit
-		}
-
-		// Update CurrentFloor
-		if (StepDownResult.bComputedFloor)
-		{
-			CurrentFloor = StepDownResult.FloorResult;
-		}
-		else
-		{
-			FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, bZeroDelta, nullptr);
-		}
-
-		// LEDGE CHECK
-		const bool bCheckLedges = !CanWalkOffLedges();
-		if (bCheckLedges && !CurrentFloor.IsWalkableFloor())
-		{
-			// Calculate possible alternate movement
-			const FVector GravDir = FVector(0.0f, 0.0f, -1.0f);
-			const FVector NewDelta = bTriedLedgeMove ? FVector::ZeroVector : GetLedgeMove(OldLocation, Delta, OldFloor); // Tutorial uses GravDir we use OldFloor
-			if (!NewDelta.IsZero())
-			{
-				// Revert the move
-				RevertMove(OldLocation, OldBase, PreviousBaseLocation, OldFloor, false);
-
-				// Avoid repeated ledge moves if the first one fails
-				bTriedLedgeMove = true;
-
-				// Try new movement direction
-				// Revert the remaining time
-				// Reverse the velocity to the new move -> Move towards the ledge move
-				Velocity = NewDelta / timeTick; // v = dx / dt
-				remainingTime += timeTick;
-				continue;
-			}
-			else
-			{
-				bool bMustJump = bZeroDelta || (OldBase == nullptr || (!OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
-				if ((bMustJump || !bCheckedFall) && CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump))
-				{
-					return;
-				}
-				bCheckedFall = true;
-
-				RevertMove(OldLocation, OldBase, PreviousBaseLocation, OldFloor, true);
-				remainingTime = 0.0f;
-				break;
-			}
-		}
-		else
-		{
-			// Here handle if we can't check for ledges OR the current floor is walkable
-			// Was walkable -> potential staircase?
-			if (CurrentFloor.IsWalkableFloor())
-			{
-				AdjustFloorHeight(); // Adjust the capsule relative to the floor
-				SetBase(CurrentFloor.HitResult.Component.Get(), CurrentFloor.HitResult.BoneName); // Kind of what the actor is standing on -> combines velocities of what they are standing on plus their own velocity (maybe)
-			}
-			else if (CurrentFloor.HitResult.bStartPenetrating && remainingTime <= 0.0f)
-			{
-				// The floor check failed because it started in penetration
-				// We do not want to try to move downward because the downward sweep failed, rather we'd like to try to pop out of the floor
-				FHitResult Hit(CurrentFloor.HitResult);
-				Hit.TraceEnd = Hit.TraceStart + FVector(0.0f, 0.0f, MAX_FLOOR_DIST);
-				const FVector RequestedAdjusted = GetPenetrationAdjustment(Hit);
-				ResolvePenetration(RequestedAdjusted, Hit, UpdatedComponent->GetComponentQuat());
-				bForceNextFloorCheck = true;
-			}
-
-			// Again check if we are swimming or failing
-			if (IsSwimming())
-			{
-				StartSwimming(OldLocation, Velocity, timeTick, remainingTime, Iterations);
-				return;
-			}
-
-			// See if we start falling
-			if (!CurrentFloor.IsWalkableFloor() && !CurrentFloor.HitResult.bStartPenetrating)
-			{
-				const bool bMustJump = bJustTeleported || bZeroDelta || (OldBase == nullptr || (OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
-				if ((bMustJump || !bCheckedFall) && CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump))
-				{
-					return;
-				}
-				bCheckedFall = false;
-			}
-		}
-
-		// Allow overlap events and such to change physics state and velocity
-		if (IsMovingOnGround())
-		{
-			// Make velocity reflect actual move
-			if (!bJustTeleported && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && timeTick >= MIN_TICK_TIME)
-			{
-				Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick; // v = dx / dt
-				MaintainHorizontalGroundVelocity();
-			}
-		}
-
-		// If we didn't move at all this iteration then abort (since future iterations will also be stuck)
-		if (UpdatedComponent->GetComponentVelocity() == OldLocation)
-		{
-			remainingTime = 0.0f;
-			break;
-		}
-	}
-
-	if (IsMovingOnGround())
-	{
-		MaintainHorizontalGroundVelocity();
-	}
-}
-
-#pragma endregion Prone
 
 #pragma region Dash
 
