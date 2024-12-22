@@ -56,6 +56,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 		uint8 Saved_bHadAnimRootMotion : 1;
 		uint8 Saved_bTransitionFinished : 1;
 		uint8 Saved_bWallRunIsRight : 1;
+		uint8 Saved_bCanClimbAgain : 1;
 		
 		FSavedMove_Adv();
 		
@@ -131,7 +132,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 
 	UPROPERTY(EditDefaultsOnly) float Climb_MaxSpeed = 300.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_BrakingDeceleration = 1000.f;
-	UPROPERTY(EditDefaultsOnly) float Climb_ReachDistance = 200.f;
+	UPROPERTY(EditDefaultsOnly) float Climb_ReachDistance = 50.f;
+	UPROPERTY(EditDefaultsOnly) float Climb_MaxDuration = 3.f;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
@@ -145,6 +147,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	bool Safe_bPrevWantsToCrouch;
 	bool Safe_bHadAnimRootMotion;
 	bool Safe_bWallRunIsRight;
+	bool Safe_bCanClimbAgain;
+
 	
 	bool Safe_bTransitionFinished;
 	TSharedPtr<FRootMotionSource_MoveToForce> TransitionRMS;
@@ -211,6 +215,7 @@ private:
 	// Climb
 	bool TryClimb();
 	void PhysClimb(float deltaTime, int32 Iterations);
+	float ClimbTimeRemaining = 0.0f; // Maybe save this as well?
 	
 	// Helpers
 	bool IsServer() const;
@@ -239,9 +244,7 @@ public:
 	UFUNCTION(BlueprintCallable) void CrouchReleased();
 	UFUNCTION(BlueprintCallable) void DashPressed();
 	UFUNCTION(BlueprintCallable) void DashReleased();
-	UFUNCTION(BlueprintCallable) void ClimbPressed();
-	UFUNCTION(BlueprintCallable) void ClimbReleased();
-	
+
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
 

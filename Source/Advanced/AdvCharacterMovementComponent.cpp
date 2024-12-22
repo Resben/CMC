@@ -90,9 +90,9 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		SetMovementMode(MOVE_Walking);
 	}
-	else if (IsFalling() && bWantsToCrouch)
+	else if (IsFalling())
 	{
-		if (TryClimb()) bWantsToCrouch = false;
+		if (TryClimb()) SLOG("Climbing now")
 	}
 	else if ((IsClimbing() || IsHanging()) && bWantsToCrouch)
 	{
@@ -250,6 +250,8 @@ void UAdvCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previou
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousMovementMode);
 
 	if (IsCustomMovementMode(CMOVE_Hang)) SLOG("Switched to hang")
+
+	if (MovementMode == MOVE_Walking) Safe_bCanClimbAgain = true;
 	
 	if (IsFalling())
 	{
@@ -397,6 +399,11 @@ bool UAdvCharacterMovementComponent::FSavedMove_Adv::CanCombineWith(const FSaved
 	{
 		return false;
 	}
+
+	if (Saved_bCanClimbAgain != NewAdvMove->Saved_bCanClimbAgain)
+	{
+		return false;
+	}
 	
 	return FSavedMove_Character::CanCombineWith(newMove, InCharacter, MaxDelta);
 }
@@ -416,6 +423,8 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::Clear()
 	Saved_bPrevWantsToCrouch = 0;
 
 	Saved_bWallRunIsRight = 0;
+
+	Saved_bCanClimbAgain = 0;
 }
 
 uint8 UAdvCharacterMovementComponent::FSavedMove_Adv::GetCompressedFlags() const
@@ -444,6 +453,8 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::SetMoveFor(ACharacter* C, f
 	Saved_bPressedAdvanceJump = CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump;
 	Saved_bHadAnimRootMotion = CharacterMovement->Safe_bHadAnimRootMotion;
 	Saved_bTransitionFinished = CharacterMovement->Safe_bTransitionFinished;
+
+	Saved_bCanClimbAgain = CharacterMovement->Safe_bCanClimbAgain;
 }
 
 void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
@@ -461,6 +472,8 @@ void UAdvCharacterMovementComponent::FSavedMove_Adv::PrepMoveFor(ACharacter* C)
 	CharacterMovement->AdvancedCharacterOwner->bPressedAdvancedJump = Saved_bPressedAdvanceJump;
 	CharacterMovement->Safe_bHadAnimRootMotion = Saved_bHadAnimRootMotion;
 	CharacterMovement->Safe_bTransitionFinished = Saved_bTransitionFinished;
+
+	CharacterMovement->Safe_bCanClimbAgain = Saved_bCanClimbAgain;
 }
 
 #pragma endregion Save Move
@@ -525,16 +538,6 @@ void UAdvCharacterMovementComponent::DashReleased()
 	// Timer is used if we are holding the press and want to dash ASAP
 	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_DashCooldown);
 	Safe_bWantsToDash = false;
-}
-
-void UAdvCharacterMovementComponent::ClimbPressed()
-{
-	if (IsFalling() || IsClimbing() || IsHanging()) bWantsToCrouch = true;
-}
-
-void UAdvCharacterMovementComponent::ClimbReleased()
-{
-	bWantsToCrouch = false;
 }
 
 bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
@@ -1490,7 +1493,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 
 bool UAdvCharacterMovementComponent::TryClimb()
 {
-	if (!IsFalling()) return false;
+	if (!IsFalling() || !Safe_bCanClimbAgain) return false;
 
 	FHitResult SurfaceHit;
 	FHitResult ClimbResult;
@@ -1508,6 +1511,9 @@ bool UAdvCharacterMovementComponent::TryClimb()
 
 	bOrientRotationToMovement = false;
 
+	ClimbTimeRemaining = Climb_MaxDuration;
+	Safe_bCanClimbAgain = false;
+	
 	return true;
 }
 
@@ -1518,13 +1524,20 @@ void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations
 		return;
 	}
 
+	ClimbTimeRemaining -= deltaTime;
+	if (ClimbTimeRemaining <= 0)
+	{
+		CharacterOwner->Jump();
+		return;
+	}
+	
 	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
 	{
 		Acceleration = FVector::ZeroVector;
 		Velocity = FVector::ZeroVector;
 		return;
 	}
-
+	
 	bJustTeleported = false;
 	Iterations++;
 	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
