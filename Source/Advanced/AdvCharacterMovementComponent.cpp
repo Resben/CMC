@@ -551,6 +551,7 @@ float UAdvCharacterMovementComponent::CapHH() const
 
 void UAdvCharacterMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode)
 {
+	HandleCustomCrouch();
 	bOrientRotationToMovement = false;
 	//Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse; // Check last move and maybe we can add a velocity boost? can't do it everytime
 
@@ -560,6 +561,7 @@ void UAdvCharacterMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomM
 // ExitSlide is a SAFE movement mode so we can call SafeMoveUpdatedComponent
 void UAdvCharacterMovementComponent::ExitSlide()
 {
+	HandleCustomUnCrouch();
 	bOrientRotationToMovement = true;
 	SLOG("ExitSlide")
 }
@@ -567,8 +569,124 @@ void UAdvCharacterMovementComponent::ExitSlide()
 void UAdvCharacterMovementComponent::ExitSlideMode()
 {
 	SLOG("ExitSlideMode")
-	UnCrouch();
+	HandleCustomUnCrouch();
 	SetMovementMode(MOVE_Walking);
+}
+
+// @todo make this network safe
+void UAdvCharacterMovementComponent::HandleCustomCrouch()
+{
+	if (!HasValidData())
+	{
+		return;
+	}
+
+	// Change collision size to crouching dimensions
+	const float ComponentScale = CharacterOwner->GetCapsuleComponent()->GetShapeScale();
+	const float OldUnscaledHalfHeight = CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+	const float OldUnscaledRadius = CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleRadius();
+	// Height is not allowed to be smaller than radius.
+	const float ClampedCrouchedHalfHeight = FMath::Max3(0.f, OldUnscaledRadius, CrouchedHalfHeight);
+	CharacterOwner->GetCapsuleComponent()->SetCapsuleSize(OldUnscaledRadius, ClampedCrouchedHalfHeight);
+	float HalfHeightAdjust = (OldUnscaledHalfHeight - ClampedCrouchedHalfHeight);
+	float ScaledHalfHeightAdjust = HalfHeightAdjust * ComponentScale;
+	
+	// Crouching to a larger height? (this is rare)
+	if (ClampedCrouchedHalfHeight > OldUnscaledHalfHeight)
+	{
+		FCollisionQueryParams CapsuleParams(SCENE_QUERY_STAT(CrouchTrace), false, CharacterOwner);
+		FCollisionResponseParams ResponseParam;
+		InitCollisionParams(CapsuleParams, ResponseParam);
+		const bool bEncroached = GetWorld()->OverlapBlockingTestByChannel(UpdatedComponent->GetComponentLocation() + ScaledHalfHeightAdjust * GetGravityDirection(), GetWorldToGravityTransform(),
+			UpdatedComponent->GetCollisionObjectType(), GetPawnCapsuleCollisionShape(SHRINK_None), CapsuleParams, ResponseParam);
+
+		// If encroached, cancel
+		if( bEncroached )
+		{
+			CharacterOwner->GetCapsuleComponent()->SetCapsuleSize(OldUnscaledRadius, OldUnscaledHalfHeight);
+			return;
+		}
+	}
+	
+	// Intentionally not using MoveUpdatedComponent, where a horizontal plane constraint would prevent the base of the capsule from staying at the same spot.
+	UpdatedComponent->MoveComponent(ScaledHalfHeightAdjust * GetGravityDirection(), UpdatedComponent->GetComponentQuat(), true, nullptr, EMoveComponentFlags::MOVECOMP_NoFlags, ETeleportType::TeleportPhysics);
+	
+	bForceNextFloorCheck = true;
+
+	// OnStartCrouch takes the change from the Default size, not the current one (though they are usually the same).
+	ACharacter* DefaultCharacter = CharacterOwner->GetClass()->GetDefaultObject<ACharacter>();
+	HalfHeightAdjust = (DefaultCharacter->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() - ClampedCrouchedHalfHeight);
+	ScaledHalfHeightAdjust = HalfHeightAdjust * ComponentScale;
+
+	CharacterOwner->OnStartCrouch( HalfHeightAdjust, ScaledHalfHeightAdjust );
+}
+
+void UAdvCharacterMovementComponent::HandleCustomUnCrouch()
+{
+	if (!HasValidData())
+	{
+		return;
+	}
+
+	ACharacter* DefaultCharacter = CharacterOwner->GetClass()->GetDefaultObject<ACharacter>();
+
+	const float CurrentCrouchedHalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+
+	const float ComponentScale = CharacterOwner->GetCapsuleComponent()->GetShapeScale();
+	const float OldUnscaledHalfHeight = CharacterOwner->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+	const float HalfHeightAdjust = DefaultCharacter->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() - OldUnscaledHalfHeight;
+	const float ScaledHalfHeightAdjust = HalfHeightAdjust * ComponentScale;
+	const FVector PawnLocation = UpdatedComponent->GetComponentLocation();
+
+	// Grow to uncrouched size.
+	check(CharacterOwner->GetCapsuleComponent());
+	
+	// Try to stay in place and see if the larger capsule fits. We use a slightly taller capsule to avoid penetration.
+	const UWorld* MyWorld = GetWorld();
+	const float SweepInflation = UE_KINDA_SMALL_NUMBER * 10.f;
+	FCollisionQueryParams CapsuleParams(SCENE_QUERY_STAT(CrouchTrace), false, CharacterOwner);
+	FCollisionResponseParams ResponseParam;
+	InitCollisionParams(CapsuleParams, ResponseParam);
+
+	// Compensate for the difference between current capsule size and standing size
+	const FCollisionShape StandingCapsuleShape = GetPawnCapsuleCollisionShape(SHRINK_HeightCustom, -SweepInflation - ScaledHalfHeightAdjust); // Shrink by negative amount, so actually grow it.
+	const ECollisionChannel CollisionChannel = UpdatedComponent->GetCollisionObjectType();
+	bool bEncroached = true;
+	
+	// Expand while keeping base location the same.
+	FVector StandingLocation = PawnLocation + (StandingCapsuleShape.GetCapsuleHalfHeight() - CurrentCrouchedHalfHeight) * -GetGravityDirection();
+	bEncroached = MyWorld->OverlapBlockingTestByChannel(StandingLocation, GetWorldToGravityTransform(), CollisionChannel, StandingCapsuleShape, CapsuleParams, ResponseParam);
+
+	if (bEncroached)
+	{
+		if (IsMovingOnGround())
+		{
+			// Something might be just barely overhead, try moving down closer to the floor to avoid it.
+			const float MinFloorDist = UE_KINDA_SMALL_NUMBER * 10.f;
+			if (CurrentFloor.bBlockingHit && CurrentFloor.FloorDist > MinFloorDist)
+			{
+				StandingLocation -= (CurrentFloor.FloorDist - MinFloorDist) * -GetGravityDirection();
+				bEncroached = MyWorld->OverlapBlockingTestByChannel(StandingLocation, GetWorldToGravityTransform(), CollisionChannel, StandingCapsuleShape, CapsuleParams, ResponseParam);
+			}
+		}				
+	}
+
+	if (!bEncroached)
+	{
+		// Commit the change in location.
+		UpdatedComponent->MoveComponent(StandingLocation - PawnLocation, UpdatedComponent->GetComponentQuat(),false, nullptr, EMoveComponentFlags::MOVECOMP_NoFlags,ETeleportType::TeleportPhysics);
+		bForceNextFloorCheck = true;
+	}
+
+	// If still encroached then abort.
+	if (bEncroached)
+	{
+		return;
+	}
+	
+	// Now call SetCapsuleSize() to cause touch/untouch events and actually grow the capsule
+	CharacterOwner->GetCapsuleComponent()->SetCapsuleSize(DefaultCharacter->GetCapsuleComponent()->GetUnscaledCapsuleRadius(), DefaultCharacter->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), true);
+	CharacterOwner->OnEndCrouch( HalfHeightAdjust, ScaledHalfHeightAdjust );
 }
 
 bool UAdvCharacterMovementComponent::CanEnterSlide() const

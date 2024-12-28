@@ -27,7 +27,7 @@ void AAdvPlayerCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaT
 		// Actual offset to update
 		FVector Offset = FMath::Lerp(FVector::ZeroVector, TargetCrouchOffset, FMath::Clamp(CrouchBlendTime, 0.0f, 1.0f));
 		
-		if (AMC->IsCrouching())
+		if (AMC->IsCrouching() || AMC->IsSliding())
 		{
 			// We update crouch blend time from 0 to CrouchBlendDuration allowing the Lerp to work with DeltaTime
 			CrouchBlendTime = FMath::Clamp(CrouchBlendTime + DeltaTime, 0.0f, CrouchBlendDuration);

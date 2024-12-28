@@ -180,6 +180,11 @@ private:
 	void PhysSlide(float deltaTime, int32 Iterations);
 	bool CanEnterSlide() const;
 	bool ShouldExitSlide() const;
+
+	// NOTE: THESE ARE NOT SIMULATED ON PROXIES
+	void HandleCustomCrouch();
+	void HandleCustomUnCrouch();
+
 public:
 	void ExitSlideMode();
 
