@@ -83,6 +83,7 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	{
 		if (CanEnterSlide())
 		{
+			bWantsToCrouch = false;
 			SetMovementMode(MOVE_Custom, CMOVE_Slide);
 		}
 	}
@@ -481,11 +482,7 @@ void UAdvCharacterMovementComponent::SprintReleased()
 void UAdvCharacterMovementComponent::CrouchPressed()
 {
 	bWantsToCrouch = true;
-	if (CanEnterSlide())
-	{
-		UnSafe_bWantsToSlide = true;
-		bWantsToCrouch = false;
-	}
+	UnSafe_bWantsToSlide = true;
 }
 
 void UAdvCharacterMovementComponent::CrouchReleased()
