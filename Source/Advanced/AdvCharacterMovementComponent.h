@@ -129,6 +129,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Climb_BrakingDeceleration = 1000.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_ReachDistance = 50.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_MaxDuration = 3.f;
+	UPROPERTY(EditDefaultsOnly) float Climb_MantleCheckInterval = 0.5f;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
@@ -162,6 +163,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 
 	// UnSafe because I just don't understand it
 	bool UnSafe_bWantsToSlide;
+	float ClimbMantleCheckAccumulator = 0.0f;
 	
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;

@@ -922,7 +922,7 @@ void UAdvCharacterMovementComponent::PerformDash()
 bool UAdvCharacterMovementComponent::TryMantle()
 {
 	// Conditions for allowing the Mantle
-	if (!(IsMovementMode(MOVE_Walking) && !IsCrouching()) && !IsMovementMode(MOVE_Falling)) return false;
+	if (!(IsMovementMode(MOVE_Walking) && !IsCrouching()) && !IsMovementMode(MOVE_Falling) && !IsCustomMovementMode(CMOVE_Climb)) return false;
 
 	// Helper variables
 
@@ -1357,7 +1357,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 bool UAdvCharacterMovementComponent::TryClimb()
 {
 	if (!IsFalling() || !Safe_bCanClimbAgain) return false;
-
+	
 	FHitResult SurfaceHit;
 	FHitResult ClimbResult;
 	FVector Start = UpdatedComponent->GetComponentLocation();
@@ -1367,6 +1367,8 @@ bool UAdvCharacterMovementComponent::TryClimb()
 
 	if (!SurfaceHit.IsValidBlockingHit()) return false;
 
+	if (TryMantle()) return false; // We would prefer to mantle instead if we have a valid climbing surface
+	
 	FQuat NewRotation = FRotationMatrix::MakeFromXZ(-SurfaceHit.Normal, FVector::UpVector).ToQuat();
 	SafeMoveUpdatedComponent(FVector::ZeroVector, NewRotation, false, ClimbResult);
 
@@ -1399,6 +1401,18 @@ void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations
 		Acceleration = FVector::ZeroVector;
 		Velocity = FVector::ZeroVector;
 		return;
+	}
+
+	ClimbMantleCheckAccumulator += deltaTime;
+	if (ClimbMantleCheckAccumulator >= Climb_MantleCheckInterval)
+	{
+		ClimbMantleCheckAccumulator = 0.0f;
+
+		if (TryMantle())
+		{
+			SLOG("Successfully Mantled from climb")
+			return;
+		}
 	}
 	
 	bJustTeleported = false;
