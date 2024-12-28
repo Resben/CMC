@@ -79,14 +79,14 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 	// We need to do this before the crouch update gets to happen that's why its in this function
 	// !bWantsToCrouch will be false on the second press while we compare this to the previous safe crouch
 	// So a double crouch will result in a slide
-	if (MovementMode == MOVE_Walking && !bWantsToCrouch && Safe_bPrevWantsToCrouch)
+	if (MovementMode == MOVE_Walking && UnSafe_bWantsToSlide)
 	{
-		if (CanSlide())
+		if (CanEnterSlide())
 		{
 			SetMovementMode(MOVE_Custom, CMOVE_Slide);
 		}
 	}
-	else if (IsCustomMovementMode(CMOVE_Slide) && !bWantsToCrouch)
+	else if (IsCustomMovementMode(CMOVE_Slide) && ShouldExitSlide())
 	{
 		SetMovementMode(MOVE_Walking);
 	}
@@ -480,11 +480,18 @@ void UAdvCharacterMovementComponent::SprintReleased()
 
 void UAdvCharacterMovementComponent::CrouchPressed()
 {
-	bWantsToCrouch = !bWantsToCrouch;
+	bWantsToCrouch = true;
+	if (CanEnterSlide())
+	{
+		UnSafe_bWantsToSlide = true;
+		bWantsToCrouch = false;
+	}
 }
 
 void UAdvCharacterMovementComponent::CrouchReleased()
 {
+	bWantsToCrouch = false;
+	UnSafe_bWantsToSlide = false;
 }
 
 void UAdvCharacterMovementComponent::DashPressed()
@@ -547,9 +554,8 @@ float UAdvCharacterMovementComponent::CapHH() const
 
 void UAdvCharacterMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode)
 {
-	bWantsToCrouch = true; // Use the capsule logic of a crouched state
 	bOrientRotationToMovement = false;
-	Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse;
+	//Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse; // Check last move and maybe we can add a velocity boost? can't do it everytime
 
 	FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, true, nullptr);
 }
@@ -557,25 +563,37 @@ void UAdvCharacterMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomM
 // ExitSlide is a SAFE movement mode so we can call SafeMoveUpdatedComponent
 void UAdvCharacterMovementComponent::ExitSlide()
 {
-	bWantsToCrouch = false;
 	bOrientRotationToMovement = true;
+	SLOG("ExitSlide")
 }
 
 void UAdvCharacterMovementComponent::ExitSlideMode()
 {
+	SLOG("ExitSlideMode")
 	UnCrouch();
 	SetMovementMode(MOVE_Walking);
 }
 
-bool UAdvCharacterMovementComponent::CanSlide() const
+bool UAdvCharacterMovementComponent::CanEnterSlide() const
 {
 	FVector Start = UpdatedComponent->GetComponentLocation();
 	FVector End = Start + CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 2.5f * FVector::DownVector;
 	FName ProfileName = TEXT("BlockAll");
 	bool bValidSurface = GetWorld()->LineTraceTestByProfile(Start, End, ProfileName, AdvancedCharacterOwner->GetIgnoreCharacterParams());
-	bool bEnoughSpeed = Velocity.SizeSquared() > pow(Slide_MinSpeed, 2);
+	bool bEnoughSpeed = Velocity.SizeSquared() > pow(Slide_MinEnterSpeed, 2);
 	
 	return bValidSurface && bEnoughSpeed;
+}
+
+bool UAdvCharacterMovementComponent::ShouldExitSlide() const
+{
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector End = Start + CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 2.5f * FVector::DownVector;
+	FName ProfileName = TEXT("BlockAll");
+	bool bValidSurface = GetWorld()->LineTraceTestByProfile(Start, End, ProfileName, AdvancedCharacterOwner->GetIgnoreCharacterParams());
+	bool bEnoughSpeed = Velocity.SizeSquared() < pow(Slide_MinExitSpeed, 2);
+	
+	return (bValidSurface && bEnoughSpeed) || !UnSafe_bWantsToSlide;
 }
 
 void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations)
@@ -586,7 +604,7 @@ void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations
 		return;
 	}
 
-	if (!CanSlide())
+	if (ShouldExitSlide())
 	{
 		SetMovementMode(MOVE_Walking);
 		StartNewPhysics(deltaTime, Iterations);
@@ -673,38 +691,14 @@ void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations
 		}
 
 		// Check ledge edges here
-		const bool bCheckLedges = !CanWalkOffLedges();
-		if (bCheckLedges && !CurrentFloor.IsWalkableFloor())
+		if (!CurrentFloor.IsWalkableFloor())
 		{
-			// Calculate possible alternative movement
-			const FVector NewDelta = bTriedLedgeMove ? FVector::ZeroVector : GetLedgeMove(OldLocation, Delta, OldFloor);
-			if (!NewDelta.IsZero())
+			bool bMustJump = bZeroDelta || (OldBase == nullptr || (!OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
+    
+			// Initiate falling while maintaining current velocity
+			if (CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump))
 			{
-				// Revert move and prevent repeated ledge moves if the first fails
-				RevertMove(OldLocation, OldBase, PreviousBaseLocation, OldFloor,  false);
-
-				bTriedLedgeMove = true;
-
-				// Try new movement direction
-				Velocity = NewDelta / timeTick;
-				remainingTime += timeTick;
-				continue;
-			}
-			else
-			{
-				// See if it is ok to jump
-				// May be problem if oldbase has world collision on
-				bool bMustJump = bZeroDelta || (OldBase == nullptr || (!OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
-				if ((bMustJump || !bCheckedFall) && CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump))
-				{
-					return;
-				}
-				bCheckedFall = true;
-
-				// Revert this move
-				RevertMove(OldLocation, OldBase, PreviousBaseLocation, OldFloor, true);
-				remainingTime = 0.0f;
-				break;
+				return;
 			}
 		}
 		else
@@ -717,6 +711,7 @@ void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations
 					HandleWalkingOffLedge(OldFloor.HitResult.ImpactNormal, OldFloor.HitResult.Normal, OldLocation, timeTick);
 					if (IsMovingOnGround())
 					{
+						SLOG("Start Falling Here")
 						// If still walking, then fall. If not assume the user set a different mode they want to keep.
 						StartFalling(Iterations, remainingTime, timeTick, Delta, OldLocation);
 					}

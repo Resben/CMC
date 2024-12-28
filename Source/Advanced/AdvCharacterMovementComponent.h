@@ -80,8 +80,9 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) bool Setting_GravityEnabledDash = true;
 	UPROPERTY(EditDefaultsOnly) float Sprint_MaxSpeed = 750.0f;
 	
-	UPROPERTY(EditDefaultsOnly) float Slide_MaxSpeed = 400.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_MinSpeed = 400.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MaxSpeed = 750.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MinEnterSpeed = 600.0f;
+	UPROPERTY(EditDefaultsOnly) float Slide_MinExitSpeed = 200.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 400.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 4000.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_FrictionFactor = 0.06f;
@@ -142,7 +143,6 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	bool Safe_bHadAnimRootMotion;
 	bool Safe_bWallRunIsRight;
 	bool Safe_bCanClimbAgain;
-
 	
 	bool Safe_bTransitionFinished;
 	TSharedPtr<FRootMotionSource_MoveToForce> TransitionRMS;
@@ -160,6 +160,9 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(ReplicatedUsing=OnRep_ShortMantle) bool Proxy_bShortMantle;
 	UPROPERTY(ReplicatedUsing=OnRep_TallMantle) bool Proxy_bTallMantle;
 
+	// UnSafe because I just don't understand it
+	bool UnSafe_bWantsToSlide;
+	
 public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual bool IsMovingOnGround() const override;
@@ -175,7 +178,8 @@ private:
 	void EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode);
 	void ExitSlide();
 	void PhysSlide(float deltaTime, int32 Iterations);
-	bool CanSlide() const;
+	bool CanEnterSlide() const;
+	bool ShouldExitSlide() const;
 public:
 	void ExitSlideMode();
 
