@@ -553,7 +553,7 @@ void UAdvCharacterMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomM
 {
 	HandleCustomCrouch();
 	bOrientRotationToMovement = false;
-	//Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse; // Check last move and maybe we can add a velocity boost? can't do it everytime
+	//Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse; // Check last move and maybe we can add a velocity boost or a boost based on current velocity
 
 	FindFloor(UpdatedComponent->GetComponentLocation(), CurrentFloor, true, nullptr);
 }
@@ -573,7 +573,7 @@ void UAdvCharacterMovementComponent::ExitSlideMode()
 	SetMovementMode(MOVE_Walking);
 }
 
-// @todo make this network safe
+/// @todo make this network safe then replace native crouch mechanics
 void UAdvCharacterMovementComponent::HandleCustomCrouch()
 {
 	if (!HasValidData())
@@ -756,8 +756,11 @@ void UAdvCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations
 
 		Acceleration = Acceleration.ProjectOnTo(UpdatedComponent->GetRightVector().GetSafeNormal2D());
 
+		float CurrentSpeed = AdvancedCharacterOwner->GetVelocity().Size();
+		float NormalizedSpeed = FMath::Clamp(CurrentSpeed / GetMaxSpeed(), 0.0f, 1.0f);
+		
 		// bFluid -> friction is applied more instead apply your own Slide_FrictionFactor
-		CalcVelocity(timeTick, GroundFriction * Slide_FrictionFactor, false, GetMaxBrakingDeceleration());
+		CalcVelocity(timeTick, GroundFriction * Slide_FrictionCurveFactor->GetFloatValue(NormalizedSpeed), false, GetMaxBrakingDeceleration());
 
 		// Move parameters
 		const FVector MoveVelocity = Velocity;

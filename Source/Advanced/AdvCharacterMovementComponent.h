@@ -85,7 +85,7 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Slide_MinExitSpeed = 200.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_EnterImpulse = 400.0f;
 	UPROPERTY(EditDefaultsOnly) float Slide_GravityForce = 4000.0f;
-	UPROPERTY(EditDefaultsOnly) float Slide_FrictionFactor = 0.06f;
+	UPROPERTY(EditDefaultsOnly) UCurveFloat* Slide_FrictionCurveFactor;
 	UPROPERTY(EditDefaultsOnly) float Slide_MaxBrakingDeceleration = 1000.0f;
 	
 	UPROPERTY(EditDefaultsOnly) float Dash_Impulse = 1000.0f;
