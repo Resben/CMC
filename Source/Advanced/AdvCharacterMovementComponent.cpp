@@ -1417,6 +1417,18 @@ void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations
 			return;
 		}
 	}
+
+	// Setup Acceleration
+	Acceleration = Acceleration.RotateAngleAxis(90.0f, -UpdatedComponent->GetRightVector());
+	Acceleration.X = 0.0f;
+	Acceleration.Y = 0.0f;
+	// Downward input detected
+	if (Acceleration.Z < 0.0f)
+	{
+		SetMovementMode(MOVE_Falling);
+		StartNewPhysics(deltaTime, Iterations);
+		return;
+	}
 	
 	bJustTeleported = false;
 	Iterations++;
@@ -1432,14 +1444,26 @@ void UAdvCharacterMovementComponent::PhysClimb(float deltaTime, int32 Iterations
 		StartNewPhysics(deltaTime, Iterations);
 		return;
 	}
-
-	// Rotate your inputs so forward key (w) is now the up vector
-	Acceleration.Z = 0.0f;
-	Acceleration = Acceleration.RotateAngleAxis(90.0f, -UpdatedComponent->GetRightVector());
-
+	
 	CalcVelocity(deltaTime, 0.0f, false, GetMaxBrakingDeceleration());
 	Velocity = FVector::VectorPlaneProject(Velocity, SurfaceHit.Normal);
+	// Ensure no side to side movement
+	Velocity.X = 0.0f;
+	Velocity.Y = 0.0f;
 
+	const bool bVelUp = Acceleration.Z > 0.0f;
+	if (!bVelUp)
+	{
+		Velocity.Z += GetGravityZ() * Climb_GravityScaleCurve * deltaTime;
+	}
+	
+	if (Velocity.Z < Climb_MaxDownwardVelocity)
+	{
+		SetMovementMode(MOVE_Falling);
+		StartNewPhysics(deltaTime, Iterations);
+		return;
+	}
+	
 	const FVector Delta = deltaTime * Velocity; // dx = v * dt
 	if (!Delta.IsNearlyZero())
 	{

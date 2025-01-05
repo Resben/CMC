@@ -130,6 +130,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Climb_ReachDistance = 50.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_MaxDuration = 3.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_MantleCheckInterval = 0.5f;
+	UPROPERTY(EditDefaultsOnly) float Climb_GravityScaleCurve = 0.4f;
+	UPROPERTY(EditDefaultsOnly) float Climb_MaxDownwardVelocity = -300.f;
 	
 	// Transient
 	UPROPERTY(Transient) AAdvancedCharacter* AdvancedCharacterOwner;
