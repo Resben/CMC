@@ -933,7 +933,7 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	FVector BaseLoc = UpdatedComponent->GetComponentLocation() + FVector::DownVector * CapHH();
 	FVector Fwd = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
 	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
-	float MaxHeight = CapHH() * 2 + Mantle_ReachHeight;
+	float MaxHeight = Mantle_MaxClimbHeight; // Assuming this has the largest value
 	// Minimum steepness we are going to tolerate
 	float CosMMWSA = FMath::Cos(FMath::DegreesToRadians(Mantle_MinWallSteepnessAngle));
 	float CosMMSA = FMath::Cos(FMath::DegreesToRadians(Mantle_MaxSurfaceAngle));
@@ -952,12 +952,12 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	// We clamp this check distance to CapR + 30 minimum and Mantle_MaxDistance maximum based on the Velocity | Fwd
 	float CheckDistance = FMath::Clamp(Velocity | Fwd, CapR() + 30, Mantle_MaxDistance);
 	// We want to mantle it if it is above the max step height so we start how checks from here up
-	FVector FrontStart = BaseLoc + FVector::UpVector * (MaxStepHeight - 1);
+	FVector FrontStart = BaseLoc + FVector::UpVector * (Mantle_MinShortClimbHeight - 1);
 	for (int i = 0; i < numberOfLineTraces + 1; i++)
 	{
 		LINE(FrontStart, FrontStart + Fwd * CheckDistance, FColor::Red)
 		if (GetWorld()->LineTraceSingleByProfile(FrontHit, FrontStart, FrontStart + Fwd * CheckDistance, "BlockAll", Params)) break;
-		FrontStart += FVector::UpVector * (2.0f * CapHH() - (MaxStepHeight - 1)) / numberOfLineTraces;
+		FrontStart += FVector::UpVector * (2.0f * CapHH() - (Mantle_MinShortClimbHeight - 1)) / numberOfLineTraces;
 	}
 	if (!FrontHit.IsValidBlockingHit()) return false;
 	// Get the steepness of the Normal of the hit
@@ -978,7 +978,7 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	float WallSin = FMath::Sqrt(1 - WallCos * WallCos);
 	// Hit -> Move into the wall by 3 Fwd (So we can detect very thin starts NOT SUPER EFFECTIVE instead try move in by half distance? come back to this later) @todo
 	// -> Up the wall in the direction of WallUp till max height minus min height -> ?? WallSin ?? @todo
-	FVector TraceStart = FrontHit.Location + (Fwd * 3) + WallUp * (MaxHeight - (MaxStepHeight - 1)) / WallSin;
+	FVector TraceStart = FrontHit.Location + (Fwd * 3) + WallUp * (MaxHeight - (Mantle_MinShortClimbHeight - 1)) / WallSin;
 	LINE(TraceStart, FrontHit.Location + Fwd, FColor::Orange)
 
 	// Get multiple collision points in case there is something above that mantle wall
@@ -1099,7 +1099,12 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	// Queue animations
 	// Transition Montages are NOT root animations
 	// Transition Montages are 1 second and the speed can be scaled based on the TransitionRMS Duration
-	Type = "Mantle";
+	if (Type == "Vault")
+	{
+		SLOG("Force set to short vault for testing")
+		bTallMantle = false;
+	}
+	
 	SetMantleMontages(Type, bTallMantle);
 	
 	return true;

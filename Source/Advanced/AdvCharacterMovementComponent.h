@@ -96,13 +96,20 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Dash_Montage;
 
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxDistance = 200;
-	UPROPERTY(EditDefaultsOnly) float Mantle_ReachHeight = 50;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MinDepth = 30;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MinWallSteepnessAngle = 75;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxSurfaceAngle = 40;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxAlignmentAngle = 45;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MinTransitionTime = 0.1;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxTransitionTime = 0.25;
+
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinShortVaultHeight = 60.f;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinTallVaultHeight = 110.f;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxVaultHeight = 150.f;
+
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinShortClimbHeight = 60.f;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MinTallClimbHeight = 180.f;
+	UPROPERTY(EditDefaultsOnly) float Mantle_MaxClimbHeight = 230.f;
 	
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallClimbMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallClimbMontage;
