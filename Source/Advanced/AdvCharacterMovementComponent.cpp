@@ -1022,8 +1022,35 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	CAPSULE(ClearCapLoc, FColor::Green)
 	SLOG("Can Mantle")
 
-	FVector ShortMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, false);
-	FVector TallMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, true);
+	// ---- CHECK IF SHOULD VAULT ---- //
+	// Essentially walls that are less than 1 capsule thick and has enough room for a capsule on the other side
+	bool shouldVault = false;
+	FHitResult VaultHit;
+	FVector VaultStart = FrontHit.Location + -FrontHit.Normal * CapR() * 2;
+	VaultStart.Z = UpdatedComponent->GetComponentLocation().Z - CapHH() * 0.5;
+	FVector VaultEnd = VaultStart + FVector::DownVector * CapHH() * 2.5;
+	
+	LINE(VaultStart, VaultEnd, FColor::Purple)
+
+	if (GetWorld()->LineTraceSingleByProfile(VaultHit, VaultStart, VaultEnd, "BlockAll", Params))
+	{ 
+		FVector VaultCapLoc = VaultHit.Location;
+		VaultCapLoc.Z += CapHH() + 2;
+		if (GetWorld()->OverlapAnyTestByProfile(VaultCapLoc, FQuat::Identity, "BlockAll", CapShape, Params))
+		{
+			CAPSULE(VaultCapLoc, FColor::Orange)
+		}
+		else
+		{
+			CAPSULE(VaultCapLoc, FColor::Green)
+			shouldVault = true;
+		}	
+	}
+
+	std::string Type = shouldVault ? "Vault" : "Mantle";
+	
+	FVector ShortMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, false, Type);
+	FVector TallMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, true, Type);
 
 	bool bTallMantle = false;
 	// If the ledge is above the head of the character
@@ -1072,23 +1099,48 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	// Queue animations
 	// Transition Montages are NOT root animations
 	// Transition Montages are 1 second and the speed can be scaled based on the TransitionRMS Duration
-	if (bTallMantle)
-	{
-		TransitionQueuedMontage = Mantle_TallMontage;
-		CharacterOwner->PlayAnimMontage(Mantle_TransitionTallMontage, 1 / TransitionRMS->Duration);
-		if (IsServer()) Proxy_bTallMantle = !Proxy_bTallMantle;
-	}
-	else
-	{
-		TransitionQueuedMontage = Mantle_ShortMontage;
-		CharacterOwner->PlayAnimMontage(Mantle_TransitionShortMontage, 1 / TransitionRMS->Duration);
-		if (IsServer()) Proxy_bShortMantle = !Proxy_bShortMantle;
-	}
+	Type = "Mantle";
+	SetMantleMontages(Type, bTallMantle);
 	
 	return true;
 }
 
-FVector UAdvCharacterMovementComponent::GetMantleStartLocation(FHitResult FrontHit, FHitResult SurfaceHit, bool bTallMantle) const
+void UAdvCharacterMovementComponent::SetMantleMontages(const std::string& Type, const bool bTallMantle)
+{
+	
+	if (Type == "Mantle")
+	{
+		if (bTallMantle)
+		{
+			TransitionQueuedMontage = Mantle_TallClimbMontage;
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionTallClimbMontage, 1 / TransitionRMS->Duration);
+			if (IsServer()) Proxy_bTallMantle = !Proxy_bTallMantle;
+		}
+		else
+		{
+			TransitionQueuedMontage = Mantle_ShortClimbMontage;
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionShortClimbMontage, 1 / TransitionRMS->Duration);
+			if (IsServer()) Proxy_bShortMantle = !Proxy_bShortMantle;
+		}
+	}
+	else if (Type == "Vault")
+	{
+		if (bTallMantle)
+		{
+			TransitionQueuedMontage = Mantle_TallVaultMontage;
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionTallVaultMontage, 1 / TransitionRMS->Duration);
+			if (IsServer()) Proxy_bTallVault = !Proxy_bTallVault;
+		}
+		else
+		{
+			TransitionQueuedMontage = Mantle_ShortVaultMontage;
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionShortVaultMontage, 1 / TransitionRMS->Duration);
+			if (IsServer()) Proxy_bShortVault = !Proxy_bShortVault;
+		}
+	}
+}
+
+FVector UAdvCharacterMovementComponent::GetMantleStartLocation(const FHitResult& FrontHit, const FHitResult& SurfaceHit, const bool bTallMantle, const std::string& Type) const
 {
 	// Working backwards from the top point to the point in which the capsule must be transitioned to in order to start the animation
 	
@@ -1487,6 +1539,8 @@ void UAdvCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<class FLi
 	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bDashStart, COND_SkipOwner)
 	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bShortMantle, COND_SkipOwner)
 	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bTallMantle, COND_SkipOwner)
+	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bShortVault, COND_SkipOwner)
+	DOREPLIFETIME_CONDITION(UAdvCharacterMovementComponent, Proxy_bTallVault, COND_SkipOwner)
 }
 
 void UAdvCharacterMovementComponent::OnRep_DashStart()
@@ -1497,12 +1551,22 @@ void UAdvCharacterMovementComponent::OnRep_DashStart()
 
 void UAdvCharacterMovementComponent::OnRep_ShortMantle()
 {
-	CharacterOwner->PlayAnimMontage(Mantle_ProxyShortMontage);
+	CharacterOwner->PlayAnimMontage(Mantle_ProxyShortClimbMontage);
 }
 
 void UAdvCharacterMovementComponent::OnRep_TallMantle()
 {
-	CharacterOwner->PlayAnimMontage(Mantle_ProxyTallMontage);
+	CharacterOwner->PlayAnimMontage(Mantle_ProxyTallClimbMontage);
+}
+
+void UAdvCharacterMovementComponent::OnRep_ShortVault()
+{
+	
+}
+
+void UAdvCharacterMovementComponent::OnRep_TallVault()
+{
+	
 }
 
 #pragma endregion Replication

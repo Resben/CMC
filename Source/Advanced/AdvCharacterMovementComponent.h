@@ -103,12 +103,22 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxAlignmentAngle = 45;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MinTransitionTime = 0.1;
 	UPROPERTY(EditDefaultsOnly) float Mantle_MaxTransitionTime = 0.25;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallMontage;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallMontage;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyTallMontage;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ShortMontage;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionShortMontage;
-	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyShortMontage;
+	
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallClimbMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallClimbMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyTallClimbMontage;
+	
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ShortClimbMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionShortClimbMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyShortClimbMontage;
+	
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TallVaultMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionTallVaultMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyTallVaultMontage;
+
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ShortVaultMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_TransitionShortVaultMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Mantle_ProxyShortVaultMontage;
 
 	UPROPERTY(EditDefaultsOnly) float WallRun_MinSpeed = 200.f;
 	UPROPERTY(EditDefaultsOnly) float WallRun_MaxSpeed = 800.f;
@@ -162,6 +172,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 
 	UPROPERTY(ReplicatedUsing=OnRep_ShortMantle) bool Proxy_bShortMantle;
 	UPROPERTY(ReplicatedUsing=OnRep_TallMantle) bool Proxy_bTallMantle;
+	UPROPERTY(ReplicatedUsing=OnRep_ShortVault) bool Proxy_bShortVault;
+	UPROPERTY(ReplicatedUsing=OnRep_TallVault) bool Proxy_bTallVault;
 
 	// UnSafe because I just don't understand it
 	bool UnSafe_bWantsToSlide;
@@ -200,8 +212,9 @@ private:
 
 	// Mantle
 	bool TryMantle();
-	FVector GetMantleStartLocation(FHitResult FrontHit, FHitResult SurfaceHit, bool bTallMantle) const;
-
+	FVector GetMantleStartLocation(const FHitResult& FrontHit, const FHitResult& SurfaceHit, const bool bTallMantle, const std::string& Type) const;
+	void SetMantleMontages(const std::string& Type, const bool bTallMantle);
+	
 	// Wall Run
 	bool TryWallRun();
 	void PhysWallRun(float deltaTime, int32 Iterations);
@@ -260,4 +273,6 @@ private:
 	UFUNCTION() void OnRep_DashStart();
 	UFUNCTION() void OnRep_ShortMantle();
 	UFUNCTION() void OnRep_TallMantle();
+	UFUNCTION() void OnRep_ShortVault();
+	UFUNCTION() void OnRep_TallVault();
 };
