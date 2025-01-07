@@ -1032,18 +1032,21 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	
 	LINE(VaultStart, VaultEnd, FColor::Purple)
 
-	if (GetWorld()->LineTraceSingleByProfile(VaultHit, VaultStart, VaultEnd, "BlockAll", Params))
-	{ 
-		FVector VaultCapLoc = VaultHit.Location;
-		VaultCapLoc.Z += CapHH() + 2;
-		if (GetWorld()->OverlapAnyTestByProfile(VaultCapLoc, FQuat::Identity, "BlockAll", CapShape, Params))
-		{
-			CAPSULE(VaultCapLoc, FColor::Orange)
-		}
-		else
-		{
-			CAPSULE(VaultCapLoc, FColor::Green)
-			shouldVault = true;
+	if (Height < Mantle_MaxVaultHeight)
+	{
+		if (GetWorld()->LineTraceSingleByProfile(VaultHit, VaultStart, VaultEnd, "BlockAll", Params))
+		{ 
+			FVector VaultCapLoc = VaultHit.Location;
+			VaultCapLoc.Z += CapHH() + 2;
+			if (GetWorld()->OverlapAnyTestByProfile(VaultCapLoc, FQuat::Identity, "BlockAll", CapShape, Params))
+			{
+				CAPSULE(VaultCapLoc, FColor::Orange)
+			}
+			else
+			{
+				CAPSULE(VaultCapLoc, FColor::Green)
+				shouldVault = true;
+			}	
 		}	
 	}
 
