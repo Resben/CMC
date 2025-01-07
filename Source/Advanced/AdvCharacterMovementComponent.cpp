@@ -1047,14 +1047,15 @@ bool UAdvCharacterMovementComponent::TryMantle()
 		}	
 	}
 
-	std::string Type = shouldVault ? "Vault" : "Mantle";
+	const std::string Type = shouldVault ? "Vault" : "Mantle";
 	
 	FVector ShortMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, false, Type);
 	FVector TallMantleTarget = GetMantleStartLocation(FrontHit, SurfaceHit, true, Type);
 
 	bool bTallMantle = false;
-	// If the ledge is above the head of the character
-	if (IsMovementMode(MOVE_Walking) && Height > CapHH() * 2)
+	// Check heights for either Mantle or Vault
+	if ((IsMovementMode(MOVE_Walking) && Type == "Mantle" && Height > Mantle_MinTallClimbHeight) ||
+		(IsMovementMode(MOVE_Walking) && Type == "Vault" && Height > Mantle_MinTallVaultHeight))
 		bTallMantle = true;
 	// If we are falling and Velocity is downward
 	else if (IsMovementMode(MOVE_Falling) && (Velocity | FVector::UpVector) < 0)
@@ -1099,12 +1100,6 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	// Queue animations
 	// Transition Montages are NOT root animations
 	// Transition Montages are 1 second and the speed can be scaled based on the TransitionRMS Duration
-	if (Type == "Vault")
-	{
-		SLOG("Force set to short vault for testing")
-		bTallMantle = false;
-	}
-	
 	SetMantleMontages(Type, bTallMantle);
 	
 	return true;
@@ -1150,7 +1145,17 @@ FVector UAdvCharacterMovementComponent::GetMantleStartLocation(const FHitResult&
 	// Working backwards from the top point to the point in which the capsule must be transitioned to in order to start the animation
 	
 	float CosWallSteepnessAngle = FrontHit.Normal | FVector::UpVector;
-	float DownDistance = bTallMantle ? CapHH() * 2.0f : MaxStepHeight - 1;
+
+	float DownDistance = 0.0f;
+	if (Type == "Mantle")
+	{
+		DownDistance = bTallMantle ? Mantle_MinTallClimbHeight : Mantle_MinShortClimbHeight;
+	}
+	else if (Type == "Vault")
+	{
+		DownDistance = bTallMantle ? Mantle_MinTallVaultHeight : Mantle_MinShortVaultHeight;
+	}
+	
 	FVector EdgeTangent = FVector::CrossProduct(SurfaceHit.Normal, FrontHit.Normal).GetSafeNormal();
 	// 1. Start at the surface hit location
 	// 2. Move backwards so capsule is lined up with wall
