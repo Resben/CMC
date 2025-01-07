@@ -234,10 +234,11 @@ private:
 	void PhysClimb(float deltaTime, int32 Iterations);
 	float ClimbTimeRemaining = 0.0f; // Maybe save this as well?
 	
-	// Helpers
+	// Helpers / Other
 	bool IsServer() const;
 	float CapR() const;
 	float CapHH() const;
+	UFUNCTION() void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	
 	
 protected:

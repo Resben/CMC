@@ -148,7 +148,19 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 			if (IsValid(TransitionQueuedMontage))
 			{
 				SetMovementMode(MOVE_Flying);
+
+				// @todo is this the best way?
+				if (UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent())
+				{
+					CapsuleComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				}
+				
 				CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
+				if (UAnimInstance* AnimInstance = CharacterOwner->GetMesh()->GetAnimInstance())
+				{
+					AnimInstance->OnMontageEnded.AddDynamic(this, &UAdvCharacterMovementComponent::OnMontageEnded);
+				}
+				
 				TransitionQueuedMontageSpeed = 0.0f;
 				TransitionQueuedMontage = nullptr;
 			}
@@ -543,6 +555,19 @@ float UAdvCharacterMovementComponent::CapR() const
 float UAdvCharacterMovementComponent::CapHH() const
 {
 	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+}
+
+void UAdvCharacterMovementComponent::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent())
+	{
+		CapsuleComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+	
+	if (UAnimInstance* AnimInstance = CharacterOwner->GetMesh()->GetAnimInstance())
+	{
+		AnimInstance->OnMontageEnded.RemoveDynamic(this, &UAdvCharacterMovementComponent::OnMontageEnded);
+	}
 }
 
 #pragma endregion Helpers
