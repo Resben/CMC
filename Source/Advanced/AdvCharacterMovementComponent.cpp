@@ -148,19 +148,7 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 			if (IsValid(TransitionQueuedMontage))
 			{
 				SetMovementMode(MOVE_Flying);
-
-				// @todo is this the best way?
-				if (UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent())
-				{
-					CapsuleComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-				}
-				
 				CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
-				if (UAnimInstance* AnimInstance = CharacterOwner->GetMesh()->GetAnimInstance())
-				{
-					AnimInstance->OnMontageEnded.AddDynamic(this, &UAdvCharacterMovementComponent::OnMontageEnded);
-				}
-				
 				TransitionQueuedMontageSpeed = 0.0f;
 				TransitionQueuedMontage = nullptr;
 			}
@@ -555,19 +543,6 @@ float UAdvCharacterMovementComponent::CapR() const
 float UAdvCharacterMovementComponent::CapHH() const
 {
 	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-}
-
-void UAdvCharacterMovementComponent::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
-{
-	if (UCapsuleComponent* CapsuleComp = CharacterOwner->GetCapsuleComponent())
-	{
-		CapsuleComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	}
-	
-	if (UAnimInstance* AnimInstance = CharacterOwner->GetMesh()->GetAnimInstance())
-	{
-		AnimInstance->OnMontageEnded.RemoveDynamic(this, &UAdvCharacterMovementComponent::OnMontageEnded);
-	}
 }
 
 #pragma endregion Helpers
@@ -1129,6 +1104,11 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	// Transition Montages are NOT root animations
 	// Transition Montages are 1 second and the speed can be scaled based on the TransitionRMS Duration
 	SetMantleMontages(Type, bTallMantle);
+
+	if (Type == "Vault" && bTallMantle == true)
+	{
+		SLOG("THIS WAS MET")
+	}
 	
 	return true;
 }
@@ -1156,13 +1136,13 @@ void UAdvCharacterMovementComponent::SetMantleMontages(const std::string& Type, 
 		if (bTallMantle)
 		{
 			TransitionQueuedMontage = Mantle_TallVaultMontage;
-			CharacterOwner->PlayAnimMontage(Mantle_TransitionTallVaultMontage, 1 / TransitionRMS->Duration);
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionTallVaultMontage, 0.5 / TransitionRMS->Duration);
 			if (IsServer()) Proxy_bTallVault = !Proxy_bTallVault;
 		}
 		else
 		{
 			TransitionQueuedMontage = Mantle_ShortVaultMontage;
-			CharacterOwner->PlayAnimMontage(Mantle_TransitionShortVaultMontage, 1 / TransitionRMS->Duration);
+			CharacterOwner->PlayAnimMontage(Mantle_TransitionShortVaultMontage, 0.5 / TransitionRMS->Duration);
 			if (IsServer()) Proxy_bShortVault = !Proxy_bShortVault;
 		}
 	}
@@ -1457,8 +1437,10 @@ bool UAdvCharacterMovementComponent::TryClimb()
 	FVector End = Start + UpdatedComponent->GetForwardVector() * Climb_ReachDistance;
 	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
 	GetWorld()->LineTraceSingleByProfile(SurfaceHit, Start, End, "BlockAll", Params);
-
+	
 	if (!SurfaceHit.IsValidBlockingHit()) return false;
+	
+	if (!SurfaceHit.GetActor()->ActorHasTag("Climb Wall")) return false;
 
 	if (TryMantle()) return false; // We would prefer to mantle instead if we have a valid climbing surface
 	

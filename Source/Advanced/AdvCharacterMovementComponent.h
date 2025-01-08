@@ -238,8 +238,6 @@ private:
 	bool IsServer() const;
 	float CapR() const;
 	float CapHH() const;
-	UFUNCTION() void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
-	
 	
 protected:
 	virtual void InitializeComponent() override;
