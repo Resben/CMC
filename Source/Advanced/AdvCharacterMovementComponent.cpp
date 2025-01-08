@@ -15,11 +15,15 @@ float MacroDuration = 2.f;
 #define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
 #define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
 #define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
+#define BOX(center, rotation, halfExtent, color) DrawDebugBox(GetWorld(), center, halfExtent, rotation, color, !MacroDuration, MacroDuration);
+#define SPHERE(loc, radius, color) DrawDebugSphere(GetWorld(), loc, radius, 10, color, !MacroDuration, MacroDuration);
 #else
-#define SLOG(x)
-#define POINT(x, c)
-#define LINE(x1, x2, c)
-#define CAPSULE(x, c)
+#define SLOG(x);
+#define POINT(x, c);
+#define LINE(x1, x2, c);
+#define CAPSULE(x, c);
+#define BOX(center, color, rotation, halfExtent);
+#define SPHERE(loc, radius, color);
 #endif
 
 #pragma region Character Movement Component
@@ -1347,48 +1351,88 @@ void UAdvCharacterMovementComponent::PhysWallRun(float deltaTime, int32 Iteratio
 bool UAdvCharacterMovementComponent::TryHang()
 {
 	if (!IsMovementMode(MOVE_Falling)) return false;
+	
 
-	SLOG("Wants to climb")
-
-	FHitResult WallHit;
-	FVector Start = UpdatedComponent->GetComponentLocation();
-	FVector End = Start + UpdatedComponent->GetForwardVector() * 300.0f; // Not needed to be parameterised -> restricted later
 	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
-	if (!GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params)) return false;
-
 	TArray<FOverlapResult> OverlapResults;
 
 	// Move detection to the players head then move 2 capsules in front
 	// Can parameterise the box size to give more accessibility to what can be grabbed
 	FVector ColLoc = UpdatedComponent->GetComponentLocation() + FVector::UpVector * CapHH() + UpdatedComponent->GetForwardVector() * CapR() * 3;
-	auto ColBox = FCollisionShape::MakeBox(FVector(100, 100, 50));
-	// Makes the box lined up with the wall and the Up vector
-	FQuat ColRot = FRotationMatrix::MakeFromXZ(WallHit.Normal, FVector::UpVector).ToQuat();
-
-	if (!GetWorld()->OverlapMultiByChannel(OverlapResults, ColLoc, ColRot, ECC_WorldStatic, ColBox, Params)) return false;
+	auto ColSphere = FCollisionShape::MakeSphere(200);
+	
+	SPHERE(ColLoc, 200, FColor::Emerald)
+	
+	if (!GetWorld()->OverlapMultiByChannel(OverlapResults, ColLoc, FQuat::Identity, ECC_WorldStatic, ColSphere, Params)) return false;
 
 	AActor* ClimbPoint = nullptr;
 
 	float MaxHeight = -1e20;
+	bool bIsSwingable = false;
 	for (FOverlapResult Result : OverlapResults)
 	{
-		if (Result.GetActor()->ActorHasTag("Climb Point"))
+		if (Result.GetActor()->ActorHasTag("Climb Point") || Result.GetActor()->ActorHasTag("Swing Point"))
 		{
 			float Height = Result.GetActor()->GetActorLocation().Z;
 			if (Height > MaxHeight)
 			{
 				MaxHeight = Height;
 				ClimbPoint = Result.GetActor();
+				if (Result.GetActor()->ActorHasTag("Swing Point"))
+				{
+					bIsSwingable = true;
+				}
+				else
+				{
+					bIsSwingable = false;
+				}
 			}
 		}
 	}
 	if (!IsValid(ClimbPoint)) return false;
 
+	FVector DirectionProperty;
+	
+	if (FProperty* FoundProp = ClimbPoint->GetClass()->FindPropertyByName(TEXT("Direction")))
+	{
+		FStructProperty* StructProp = CastField<FStructProperty>(FoundProp);
+		if (StructProp && StructProp->Struct == TBaseStructure<FVector>::Get())
+		{
+			void* ValuePtr = StructProp->ContainerPtrToValuePtr<void>(ClimbPoint);
+			DirectionProperty = *reinterpret_cast<FVector*>(ValuePtr);
+		}
+		else
+		{
+			return false;
+		}
+	}
+	else
+	{
+		return false;
+	}
+	
 	// Where the capsule should be
 	// Back away from the wall -> 1.01 for a bit of tolerance from the wall
-	FVector TargetLocation = ClimbPoint->GetActorLocation() + WallHit.Normal * CapR() * 1.01f + FVector::DownVector * CapHH();
-	FQuat TargetRotation = FRotationMatrix::MakeFromXZ(-WallHit.Normal, FVector::UpVector).ToQuat();
-
+	FVector TargetLocation;
+	FQuat TargetRotation;
+	
+	float DirectionPropertyDot = GetForwardVector() | DirectionProperty;
+	if (DirectionPropertyDot > 0.0f)
+	{
+		DirectionProperty = -DirectionProperty;
+	}
+	
+	if (bIsSwingable)
+	{
+		TargetLocation = ClimbPoint->GetActorLocation() + DirectionProperty * CapHH() + FVector::DownVector * CapHH();
+		TargetRotation = FRotationMatrix::MakeFromXZ(-DirectionProperty, FVector::UpVector).ToQuat();
+	}
+	else
+	{
+		TargetLocation = ClimbPoint->GetActorLocation() + DirectionProperty * CapR() * 1.01f + FVector::DownVector * CapHH();
+		TargetRotation = FRotationMatrix::MakeFromXZ(-DirectionProperty, FVector::UpVector).ToQuat();
+	}
+	
 	// Test if the character can reach this goal -> Including the movement to said goal not just if they fit in the target
 	FTransform CurrentTransform = UpdatedComponent->GetComponentTransform();
 	FHitResult Hit, ReturnHit;
@@ -1430,7 +1474,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 bool UAdvCharacterMovementComponent::TryClimb()
 {
 	if (!IsFalling() || !Safe_bCanClimbAgain) return false;
-	
+
 	FHitResult SurfaceHit;
 	FHitResult ClimbResult;
 	FVector Start = UpdatedComponent->GetComponentLocation();
