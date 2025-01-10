@@ -16,7 +16,7 @@ float MacroDuration = 2.f;
 #define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
 #define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
 #define BOX(center, rotation, halfExtent, color) DrawDebugBox(GetWorld(), center, halfExtent, rotation, color, !MacroDuration, MacroDuration);
-#define SPHERE(loc, radius, color) DrawDebugSphere(GetWorld(), loc, radius, 10, color, !MacroDuration, MacroDuration);
+#define SPHERE(loc, radius, color) DrawDebugSphere(GetWorld(), loc, radius, 32, color, !MacroDuration, MacroDuration);
 #else
 #define SLOG(x);
 #define POINT(x, c);
@@ -964,6 +964,9 @@ bool UAdvCharacterMovementComponent::TryMantle()
 		FrontStart += FVector::UpVector * (2.0f * CapHH() - (Mantle_MinShortClimbHeight - 1)) / numberOfLineTraces;
 	}
 	if (!FrontHit.IsValidBlockingHit()) return false;
+
+	if (FrontHit.GetActor()->ActorHasTag("Climb Point") || FrontHit.GetActor()->ActorHasTag("Swing Point")) return false;
+	
 	// Get the steepness of the Normal of the hit
 	float CosWallSteepnessAngle = FrontHit.Normal | FVector::UpVector;
 	// First check is for the steepness of the wall the second check is for the angle of the wall to the player i.e. how close is your fwd to being perpendicular to the wall
@@ -1359,12 +1362,11 @@ bool UAdvCharacterMovementComponent::TryHang()
 	// Move detection to the players head then move 2 capsules in front
 	// Can parameterise the box size to give more accessibility to what can be grabbed
 	FVector ColLoc = UpdatedComponent->GetComponentLocation() + FVector::UpVector * CapHH() + UpdatedComponent->GetForwardVector() * CapR() * 3;
-	auto ColSphere = FCollisionShape::MakeSphere(200);
-	
-	SPHERE(ColLoc, 200, FColor::Emerald)
-	
-	if (!GetWorld()->OverlapMultiByChannel(OverlapResults, ColLoc, FQuat::Identity, ECC_WorldStatic, ColSphere, Params)) return false;
+	auto ColSphere = FCollisionShape::MakeSphere(100);
 
+	SPHERE(ColLoc, 200, FColor::Emerald)	
+	if (!GetWorld()->OverlapMultiByChannel(OverlapResults, ColLoc, FQuat::Identity, ECC_WorldStatic, ColSphere, Params)) return false;
+	
 	AActor* ClimbPoint = nullptr;
 
 	float MaxHeight = -1e20;
@@ -1424,7 +1426,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 	
 	if (bIsSwingable)
 	{
-		TargetLocation = ClimbPoint->GetActorLocation() + DirectionProperty * CapHH() + FVector::DownVector * CapHH();
+		TargetLocation = ClimbPoint->GetActorLocation() + DirectionProperty * CapR() + FVector::DownVector * CapHH();
 		TargetRotation = FRotationMatrix::MakeFromXZ(-DirectionProperty, FVector::UpVector).ToQuat();
 	}
 	else
@@ -1444,7 +1446,6 @@ bool UAdvCharacterMovementComponent::TryHang()
 	if (!ResultLocation.Equals(TargetLocation)) return false;
 
 	// Passed all conditions
-
 	bOrientRotationToMovement = false;
 
 	float UpSpeed = Velocity | FVector::UpVector;
