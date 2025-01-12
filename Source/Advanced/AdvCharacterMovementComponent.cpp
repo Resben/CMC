@@ -531,6 +531,14 @@ void UAdvCharacterMovementComponent::DashReleased()
 	Safe_bWantsToDash = false;
 }
 
+void UAdvCharacterMovementComponent::HandleVaultEnd()
+{
+	CharacterOwner->StopAnimMontage();
+	const FVector CapturedVelocity = CharacterOwner->GetVelocity();
+	SetMovementMode(MOVE_Falling);
+	Velocity = CapturedVelocity;
+}
+
 bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
 {
 	return MovementMode == MOVE_Custom && CustomMovementMode == InCustomMovementMode;

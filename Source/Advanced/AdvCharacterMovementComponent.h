@@ -262,6 +262,7 @@ public:
 	UFUNCTION(BlueprintCallable) void CrouchReleased();
 	UFUNCTION(BlueprintCallable) void DashPressed();
 	UFUNCTION(BlueprintCallable) void DashReleased();
+	UFUNCTION(BlueprintCallable) void HandleVaultEnd();
 
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
