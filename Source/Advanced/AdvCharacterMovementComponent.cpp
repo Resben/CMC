@@ -166,6 +166,17 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 			SetMovementMode(MOVE_Custom, CMOVE_Hang);
 			Velocity = FVector::ZeroVector;
 		}
+		else if (TransitionName == "Swing")
+		{
+			if (IsValid(TransitionQueuedMontage))
+			{
+				CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
+			}
+			else
+			{
+				SetMovementMode(MOVE_Walking);
+			}
+		}
 
 		TransitionName = "";
 		Safe_bTransitionFinished = false;
@@ -1383,6 +1394,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 				if (Result.GetActor()->ActorHasTag("Swing Point"))
 				{
 					bIsSwingable = true;
+					return false; /// !!!!!!!!!!!!!!!!!!!!!!!! @todo PLEASE DON'T LEAVE THIS HERE
 				}
 				else
 				{
@@ -1465,9 +1477,18 @@ bool UAdvCharacterMovementComponent::TryHang()
 	SetMovementMode(MOVE_Flying);
 	TransitionRMS_ID = ApplyRootMotionSource(TransitionRMS);
 
-	TransitionQueuedMontage = nullptr;
-	TransitionName = "Hang";
-	CharacterOwner->PlayAnimMontage(Hang_TransitionMontage, 1 / TransitionRMS->Duration);
+	if (bIsSwingable)
+	{
+		TransitionQueuedMontage = Swing_Montage;
+		TransitionName = "Swing";
+		CharacterOwner->PlayAnimMontage(Swing_TransitionMontage, 1 / TransitionRMS->Duration);
+	}
+	else
+	{
+		TransitionQueuedMontage = nullptr;
+		TransitionName = "Hang";
+		CharacterOwner->PlayAnimMontage(Hang_TransitionMontage, 1 / TransitionRMS->Duration);	
+	}
 
 	return true;
 }

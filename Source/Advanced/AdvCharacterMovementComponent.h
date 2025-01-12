@@ -141,6 +141,8 @@ class ADVANCED_API UAdvCharacterMovementComponent : public UCharacterMovementCom
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_TransitionMontage;
 	UPROPERTY(EditDefaultsOnly) UAnimMontage* Hang_WallJumpMontage;
 	UPROPERTY(EditDefaultsOnly) float Hang_WallJumpForce = 400.f;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Swing_TransitionMontage;
+	UPROPERTY(EditDefaultsOnly) UAnimMontage* Swing_Montage;
 
 	UPROPERTY(EditDefaultsOnly) float Climb_MaxSpeed = 300.f;
 	UPROPERTY(EditDefaultsOnly) float Climb_BrakingDeceleration = 1000.f;
