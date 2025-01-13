@@ -1225,13 +1225,14 @@ bool UAdvCharacterMovementComponent::TryWallRun()
 	FVector LeftEnd = Start - UpdatedComponent->GetRightVector() * CapR() * 2;
 	FVector RightEnd = Start + UpdatedComponent->GetRightVector() * CapR() * 2;
 	auto Params = AdvancedCharacterOwner->GetIgnoreCharacterParams();
-	FHitResult FloorHit, WallHit;
+	FHitResult FloorHit, WallHit, TopHit;
 
 	// Check height
 	if (GetWorld()->LineTraceSingleByProfile(FloorHit, Start, Start + FVector::DownVector * (CapHH() + WallRun_MinHeight), "BlockAll", Params)) return false;
-
+	
 	// Left Cast
 	GetWorld()->LineTraceSingleByProfile(WallHit, Start, LeftEnd, "BlockAll", Params);
+	
 	// Velocity must be point at the wall to some degree just not away from the wall
 	if (WallHit.IsValidBlockingHit() && (Velocity | WallHit.Normal) < 0)
 	{
@@ -1251,6 +1252,20 @@ bool UAdvCharacterMovementComponent::TryWallRun()
 		}
 	}
 
+	// Check height from top of wall don't want to be too far up the wall
+	FVector WallTopStart = UpdatedComponent->GetComponentLocation() + FVector::UpVector * (CapHH() + 5.0f) + -WallHit.Normal * (CapR() * 2 + 5.0f);
+	FVector WallTopEnd = WallTopStart + FVector::UpVector * CapHH() * -2;
+
+	LINE(WallTopStart, WallTopEnd, FColor::Turquoise)
+	if (GetWorld()->LineTraceSingleByProfile(TopHit, WallTopStart, WallTopEnd, "BlockAll", Params))
+	{
+		if (!TopHit.bStartPenetrating)
+		{
+			SLOG("Too high")
+			return false;	
+		}
+	}
+	
 	// The velocity vector projected onto the plane of the wall
 	FVector ProjectedVelocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
 
