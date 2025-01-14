@@ -1218,7 +1218,7 @@ bool UAdvCharacterMovementComponent::TryWallRun()
 	// Prevents wall run if you have high vertical velocity (Can be changed to what you see fit)
 	if (!IsFalling()) return false;
 	if (Velocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2)) return false;
-	if (Velocity.Z < -WallRun_MaxVerticalSpeed) return false;
+	//if (Velocity.Z < -WallRun_MaxVerticalSpeed) return false; <-- Getting rid of this for now since if we are too high we may gain to much vertical before the wall run starts
 
 	// Set line hits for left and right
 	FVector Start = UpdatedComponent->GetComponentLocation();
@@ -1251,23 +1251,20 @@ bool UAdvCharacterMovementComponent::TryWallRun()
 			return false;
 		}
 	}
+	
 
 	// Check height from top of wall don't want to be too far up the wall
-	FVector WallTopStart = UpdatedComponent->GetComponentLocation() + FVector::UpVector * (CapHH() + 5.0f) + -WallHit.Normal * (CapR() * 2 + 5.0f);
-	FVector WallTopEnd = WallTopStart + FVector::UpVector * CapHH() * -2;
+	const FVector WallTopStart = FVector(WallHit.Location.X, WallHit.Location.Y, UpdatedComponent->GetComponentLocation().Z) + FVector::UpVector * (CapHH() + 5.0f) + -WallHit.Normal * 5.0f;
+	const FVector WallTopEnd = WallTopStart + FVector::DownVector * CapHH() * 2;
 
-	LINE(WallTopStart, WallTopEnd, FColor::Turquoise)
+	LINE(WallTopStart, WallTopEnd, FColor::Magenta)
 	if (GetWorld()->LineTraceSingleByProfile(TopHit, WallTopStart, WallTopEnd, "BlockAll", Params))
 	{
-		if (!TopHit.bStartPenetrating)
-		{
-			SLOG("Too high")
-			return false;	
-		}
+		if (!TopHit.bStartPenetrating) return false;	
 	}
 	
 	// The velocity vector projected onto the plane of the wall
-	FVector ProjectedVelocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
+	const FVector ProjectedVelocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
 
 	// More restrictive than the first check for MinSpeed
 	if (ProjectedVelocity.SizeSquared2D() < pow(WallRun_MinSpeed, 2)) return false;
