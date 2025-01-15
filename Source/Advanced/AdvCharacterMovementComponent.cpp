@@ -38,6 +38,13 @@ void UAdvCharacterMovementComponent::InitializeComponent()
 	Super::InitializeComponent();
 
 	AdvancedCharacterOwner = Cast<AAdvancedCharacter>(GetOwner());
+	if (USkeletalMeshComponent* MeshComp = AdvancedCharacterOwner->GetMesh())
+	{
+		if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
+		{
+			AnimInstance->OnMontageEnded.AddDynamic(this, &UAdvCharacterMovementComponent::OnMontageEnded);
+		}
+	}
 }
 
 FNetworkPredictionData_Client* UAdvCharacterMovementComponent::GetPredictionData_Client() const
@@ -531,14 +538,6 @@ void UAdvCharacterMovementComponent::DashReleased()
 	Safe_bWantsToDash = false;
 }
 
-void UAdvCharacterMovementComponent::HandleVaultEnd()
-{
-	CharacterOwner->StopAnimMontage();
-	const FVector CapturedVelocity = CharacterOwner->GetVelocity();
-	SetMovementMode(MOVE_Falling);
-	Velocity = CapturedVelocity;
-}
-
 bool UAdvCharacterMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
 {
 	return MovementMode == MOVE_Custom && CustomMovementMode == InCustomMovementMode;
@@ -566,6 +565,30 @@ float UAdvCharacterMovementComponent::CapR() const
 float UAdvCharacterMovementComponent::CapHH() const
 {
 	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+}
+
+void UAdvCharacterMovementComponent::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (LastMontage == "NA") return;
+	
+	if (bInterrupted)
+	{
+		if (LastMontage == "Vault" && bShouldVaultHang)
+		{
+			SLOG("Here we would hang after a vault")
+			bShouldVaultHang = false;
+		}
+	}
+	else
+	{
+		if (LastMontage == "Vault" && bShouldVaultHang)
+		{
+			SLOG("Here we would hang after a vault")
+			bShouldVaultHang = false;
+		}
+	}
+
+	LastMontage = "NA";
 }
 
 #pragma endregion Helpers
@@ -1060,7 +1083,8 @@ bool UAdvCharacterMovementComponent::TryMantle()
 
 	if (Height < Mantle_MaxVaultHeight)
 	{
-		if (GetWorld()->LineTraceSingleByProfile(VaultHit, VaultStart, VaultEnd, "BlockAll", Params))
+		GetWorld()->LineTraceSingleByProfile(VaultHit, VaultStart, VaultEnd, "BlockAll", Params);
+		if (VaultHit.IsValidBlockingHit())
 		{ 
 			FVector VaultCapLoc = VaultHit.Location;
 			VaultCapLoc.Z += CapHH() + 2;
@@ -1073,7 +1097,21 @@ bool UAdvCharacterMovementComponent::TryMantle()
 				CAPSULE(VaultCapLoc, FColor::Green)
 				shouldVault = true;
 			}	
-		}	
+		}
+		else if (!VaultHit.bStartPenetrating)
+		{
+			if (GetWorld()->OverlapAnyTestByProfile(VaultEnd, FQuat::Identity, "BlockAll", CapShape, Params))
+			{
+				CAPSULE(VaultEnd, FColor::Orange)
+			}
+			else
+			{
+				SLOG("WE SET THIS")
+				CAPSULE(VaultEnd, FColor::Green)
+				shouldVault = true;
+				bShouldVaultHang = true;
+			}	
+		}
 	}
 
 	const std::string Type = shouldVault ? "Vault" : "Mantle";
@@ -1119,6 +1157,7 @@ bool UAdvCharacterMovementComponent::TryMantle()
 	TransitionRMS->StartLocation = UpdatedComponent->GetComponentLocation();
 	TransitionRMS->TargetLocation = TransitionTarget;
 	TransitionName = "Mantle";
+	LastMontage = Type; // ID for OnMontageEnd
 	
 	// Zero out the Velocity
 	Velocity = FVector::ZeroVector;

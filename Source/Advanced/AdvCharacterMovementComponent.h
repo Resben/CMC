@@ -220,6 +220,7 @@ private:
 	void PerformDash();
 
 	// Mantle
+	bool bShouldVaultHang;
 	bool TryMantle();
 	FVector GetMantleStartLocation(const FHitResult& FrontHit, const FHitResult& SurfaceHit, const bool bTallMantle, const std::string& Type) const;
 	void SetMantleMontages(const std::string& Type, const bool bTallMantle);
@@ -240,6 +241,9 @@ private:
 	bool IsServer() const;
 	float CapR() const;
 	float CapHH() const;
+	std::string LastMontage = "NA";
+	UFUNCTION() void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	
 protected:
 	virtual void InitializeComponent() override;
@@ -262,7 +266,6 @@ public:
 	UFUNCTION(BlueprintCallable) void CrouchReleased();
 	UFUNCTION(BlueprintCallable) void DashPressed();
 	UFUNCTION(BlueprintCallable) void DashReleased();
-	UFUNCTION(BlueprintCallable) void HandleVaultEnd();
 
 	UFUNCTION(BlueprintPure) bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
 	UFUNCTION(BlueprintPure) bool IsMovementMode(EMovementMode InMovementMode) const;
