@@ -177,8 +177,10 @@ void UAdvCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float De
 		{
 			if (IsValid(TransitionQueuedMontage))
 			{
+				SetMovementMode(MOVE_Flying);
 				CharacterOwner->PlayAnimMontage(TransitionQueuedMontage, TransitionQueuedMontageSpeed);
-			}
+				TransitionQueuedMontageSpeed = 0.0f;
+				TransitionQueuedMontage = nullptr;			}
 			else
 			{
 				SetMovementMode(MOVE_Walking);
@@ -1453,7 +1455,6 @@ bool UAdvCharacterMovementComponent::TryHang()
 				if (Result.GetActor()->ActorHasTag("Swing Point"))
 				{
 					bIsSwingable = true;
-					return false; /// !!!!!!!!!!!!!!!!!!!!!!!! @todo PLEASE DON'T LEAVE THIS HERE
 				}
 				else
 				{
@@ -1540,7 +1541,7 @@ bool UAdvCharacterMovementComponent::TryHang()
 	{
 		TransitionQueuedMontage = Swing_Montage;
 		TransitionName = "Swing";
-		CharacterOwner->PlayAnimMontage(Swing_TransitionMontage, 1 / TransitionRMS->Duration);
+		CharacterOwner->PlayAnimMontage(Swing_TransitionMontage, 0.5 / TransitionRMS->Duration);
 	}
 	else
 	{
